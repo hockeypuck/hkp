@@ -15,7 +15,7 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-package hkp
+package sks
 
 import (
 	"bytes"
@@ -32,11 +32,10 @@ import (
 	cf "gopkg.in/hockeypuck/conflux.v2"
 	"gopkg.in/hockeypuck/conflux.v2/recon"
 	"gopkg.in/hockeypuck/conflux.v2/recon/leveldb"
+	"gopkg.in/hockeypuck/hkp.v0"
 	log "gopkg.in/hockeypuck/logrus.v0"
 	"gopkg.in/hockeypuck/openpgp.v0"
 	"gopkg.in/tomb.v2"
-
-	"github.com/hockeypuck/hockeypuck"
 )
 
 const requestChunkSize = 100
@@ -45,12 +44,17 @@ const maxKeyRecoveryAttempts = 10
 
 type keyRecoveryCounter map[string]int
 
-type SKSPeer struct {
+type Settings struct {
+	recon.Settings
+	Path string
+}
+
+type Peer struct {
 	peer       *recon.Peer
-	storage    Storage
+	storage    hkp.Storage
 	settings   *hockeypuck.Settings
 	ptree      recon.PrefixTree
-	keyChanges chan KeyChange
+	keyChanges chan hkp.KeyChange
 
 	t tomb.Tomb
 
@@ -58,18 +62,18 @@ type SKSPeer struct {
 	recoverAttempts keyRecoveryCounter
 }
 
-func newSksPTree(s *hockeypuck.Settings) (recon.PrefixTree, error) {
-	if _, err := os.Stat(s.Conflux.Recon.LevelDB.Path); os.IsNotExist(err) {
-		log.Debugf("creating prefix tree at: %q", s.Conflux.Recon.LevelDB.Path)
-		err = os.MkdirAll(s.Conflux.Recon.LevelDB.Path, 0755)
+func newSksPTree(s *Settings) (recon.PrefixTree, error) {
+	if _, err := os.Stat(s.Path); os.IsNotExist(err) {
+		log.Debugf("creating prefix tree at: %q", s.Path)
+		err = os.MkdirAll(s.Path, 0755)
 		if err != nil {
 			return nil, errgo.Mask(err)
 		}
 	}
-	return leveldb.New(s.Conflux.Recon.PTreeConfig, s.Conflux.Recon.LevelDB.Path)
+	return leveldb.New(s.PTreeConfig, s.Path)
 }
 
-func NewSKSPeer(storage Storage, s *hockeypuck.Settings) (*SKSPeer, error) {
+func NewPeer(storage hkp.Storage, s *Settings) (*Peer, error) {
 	ptree, err := newSksPTree(s)
 	if err != nil {
 		return nil, errgo.Mask(err)
@@ -79,8 +83,8 @@ func NewSKSPeer(storage Storage, s *hockeypuck.Settings) (*SKSPeer, error) {
 		return nil, errgo.Mask(err)
 	}
 
-	peer := recon.NewPeer(&s.Conflux.Recon.Settings, ptree)
-	sksPeer := &SKSPeer{
+	peer := recon.NewPeer(&s.Settings, ptree)
+	sksPeer := &Peer{
 		ptree:           ptree,
 		storage:         storage,
 		settings:        s,
@@ -91,13 +95,13 @@ func NewSKSPeer(storage Storage, s *hockeypuck.Settings) (*SKSPeer, error) {
 	return sksPeer, nil
 }
 
-func (r *SKSPeer) Start() {
+func (r *Peer) Start() {
 	r.t.Go(r.handleRecovery)
 	r.t.Go(r.handleKeyChanges)
 	r.peer.Start()
 }
 
-func (r *SKSPeer) Stop() {
+func (r *Peer) Stop() {
 	log.Info("recon processing: stopping")
 	r.t.Kill(nil)
 	err := r.t.Wait()
@@ -128,13 +132,13 @@ func DigestZp(digest string) (*cf.Zp, error) {
 	return cf.Zb(cf.P_SKS, buf), nil
 }
 
-func (r *SKSPeer) notifyKeyChange(change KeyChange) {
+func (r *Peer) notifyKeyChange(change KeyChange) {
 	if r != nil {
 		r.keyChanges <- change
 	}
 }
 
-func (r *SKSPeer) handleKeyChanges() error {
+func (r *Peer) handleKeyChanges() error {
 	for {
 		select {
 		case <-r.t.Dying():
@@ -148,13 +152,13 @@ func (r *SKSPeer) handleKeyChanges() error {
 	}
 }
 
-func (r *SKSPeer) clearRecoverAttempts(z *cf.Zp) {
+func (r *Peer) clearRecoverAttempts(z *cf.Zp) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.recoverAttempts, z.String())
 }
 
-func (r *SKSPeer) updateDigests(change KeyChange) error {
+func (r *Peer) updateDigests(change KeyChange) error {
 	for _, digest := range change.InsertDigests() {
 		digestZp, err := DigestZp(digest)
 		if err != nil {
@@ -185,7 +189,7 @@ func (r *SKSPeer) updateDigests(change KeyChange) error {
 	return nil
 }
 
-func (r *SKSPeer) handleRecovery() error {
+func (r *Peer) handleRecovery() error {
 	rcvrChans := make(map[string]chan *recon.Recover)
 	defer func() {
 		for _, ch := range rcvrChans {
@@ -222,7 +226,7 @@ func (r *SKSPeer) handleRecovery() error {
 type workRecoveredReady chan interface{}
 type workRecoveredWork chan *cf.ZSet
 
-func (r *SKSPeer) handleRemoteRecovery(rcvr *recon.Recover, rcvrChan chan *recon.Recover) {
+func (r *Peer) handleRemoteRecovery(rcvr *recon.Recover, rcvrChan chan *recon.Recover) {
 	recovered := cf.NewZSet()
 	ready := make(workRecoveredReady)
 	work := make(workRecoveredWork)
@@ -251,7 +255,7 @@ func (r *SKSPeer) handleRemoteRecovery(rcvr *recon.Recover, rcvrChan chan *recon
 	}
 }
 
-func (r *SKSPeer) workRecovered(rcvr *recon.Recover, ready workRecoveredReady, work workRecoveredWork) {
+func (r *Peer) workRecovered(rcvr *recon.Recover, ready workRecoveredReady, work workRecoveredWork) {
 	defer close(ready)
 	timer := time.NewTimer(time.Duration(3) * time.Second)
 	defer timer.Stop()
@@ -278,7 +282,7 @@ func (r *SKSPeer) workRecovered(rcvr *recon.Recover, ready workRecoveredReady, w
 	}
 }
 
-func (r *SKSPeer) requestRecovered(rcvr *recon.Recover, elements *cf.ZSet) error {
+func (r *Peer) requestRecovered(rcvr *recon.Recover, elements *cf.ZSet) error {
 	items := elements.Items()
 	var resultErr error
 	for len(items) > 0 {
@@ -302,14 +306,14 @@ func (r *SKSPeer) requestRecovered(rcvr *recon.Recover, elements *cf.ZSet) error
 	return resultErr
 }
 
-func (r *SKSPeer) incrementRecoverAttempts(z *cf.Zp) int {
+func (r *Peer) incrementRecoverAttempts(z *cf.Zp) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.recoverAttempts[z.String()]++
 	return r.recoverAttempts[z.String()]
 }
 
-func (r *SKSPeer) countChunk(chunk []*cf.Zp) {
+func (r *Peer) countChunk(chunk []*cf.Zp) {
 	for _, z := range chunk {
 		n := r.incrementRecoverAttempts(z)
 		if n > maxKeyRecoveryAttempts {
@@ -323,7 +327,7 @@ func (r *SKSPeer) countChunk(chunk []*cf.Zp) {
 	}
 }
 
-func (r *SKSPeer) requestChunk(rcvr *recon.Recover, chunk []*cf.Zp) error {
+func (r *Peer) requestChunk(rcvr *recon.Recover, chunk []*cf.Zp) error {
 	var remoteAddr string
 	remoteAddr, err := rcvr.HkpAddr()
 	if err != nil {
@@ -392,7 +396,7 @@ func (r *SKSPeer) requestChunk(rcvr *recon.Recover, chunk []*cf.Zp) error {
 	return nil
 }
 
-func (r *SKSPeer) upsertKeys(buf []byte) error {
+func (r *Peer) upsertKeys(buf []byte) error {
 	for readKey := range openpgp.ReadKeys(bytes.NewBuffer(buf)) {
 		if readKey.Error != nil {
 			return errgo.Mask(readKey.Error)
@@ -401,7 +405,7 @@ func (r *SKSPeer) upsertKeys(buf []byte) error {
 		if err != nil {
 			return errgo.Mask(err)
 		}
-		change, err := UpsertKey(r.storage, readKey.Pubkey)
+		change, err := hkp.UpsertKey(r.storage, readKey.Pubkey)
 		if err != nil {
 			return errgo.Mask(err)
 		}

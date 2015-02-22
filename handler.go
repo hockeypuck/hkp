@@ -42,16 +42,12 @@ func httpError(w http.ResponseWriter, statusCode int, err error) {
 
 type Handler struct {
 	storage Storage
-	peer    *SKSPeer
 }
 
 type HandlerOption func(h *Handler) error
 
-func NewHandler(storage Storage, peer *SKSPeer) *Handler {
-	return &Handler{
-		storage: storage,
-		peer:    peer,
-	}
+func NewHandler(storage Storage) *Handler {
+	return &Handler{storage: storage}
 }
 
 func (h *Handler) Register(r *httprouter.Router) {
@@ -267,8 +263,6 @@ func (h *Handler) Add(w http.ResponseWriter, r *http.Request, _ httprouter.Param
 			return
 		}
 
-		h.peer.notifyKeyChange(change)
-
 		fp := readKey.Pubkey.QualifiedFingerprint()
 		switch change.(type) {
 		case KeyAdded:
@@ -284,65 +278,4 @@ func (h *Handler) Add(w http.ResponseWriter, r *http.Request, _ httprouter.Param
 	w.WriteHeader(http.StatusOK)
 	enc := json.NewEncoder(w)
 	enc.Encode(&result)
-}
-
-type KeyChange interface {
-	InsertDigests() []string
-	RemoveDigests() []string
-}
-
-type KeyAdded struct {
-	Digest string
-}
-
-func (ka KeyAdded) InsertDigests() []string {
-	return []string{ka.Digest}
-}
-
-func (ka KeyAdded) RemoveDigests() []string {
-	return nil
-}
-
-type KeyReplaced struct {
-	OldDigest string
-	NewDigest string
-}
-
-func (kr KeyReplaced) InsertDigests() []string {
-	return []string{kr.NewDigest}
-}
-
-func (kr KeyReplaced) RemoveDigests() []string {
-	return []string{kr.OldDigest}
-}
-
-type KeyNotChanged struct{}
-
-func (knc KeyNotChanged) InsertDigests() []string { return nil }
-
-func (knc KeyNotChanged) RemoveDigests() []string { return nil }
-
-func UpsertKey(storage Storage, pubkey *openpgp.Pubkey) (KeyChange, error) {
-	lastKeys, err := storage.FetchKeys([]string{pubkey.RFingerprint})
-	if len(lastKeys) == 0 || IsNotFound(err) {
-		err = storage.Insert([]*openpgp.Pubkey{pubkey})
-		if err != nil {
-			return nil, errgo.Mask(err)
-		}
-		return KeyAdded{Digest: pubkey.MD5}, nil
-	}
-	lastKey := lastKeys[0]
-	lastMD5 := lastKey.MD5
-	err = openpgp.Merge(lastKey, pubkey)
-	if err != nil {
-		return nil, errgo.Mask(err)
-	}
-	if lastMD5 != lastKey.MD5 {
-		err = storage.Update(lastKey)
-		if err != nil {
-			return nil, errgo.Mask(err)
-		}
-		return KeyReplaced{OldDigest: lastMD5, NewDigest: lastKey.MD5}, nil
-	}
-	return KeyNotChanged{}, nil
 }

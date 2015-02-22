@@ -19,14 +19,32 @@ package hkp
 
 import (
 	"errors"
+	"time"
 
-	"github.com/hockeypuck/hockeypuck/openpgp"
+	"gopkg.in/errgo.v1"
+
+	"gopkg.in/hockeypuck/openpgp.v0"
 )
 
 var ErrKeyNotFound = errors.New("key not found")
 
 func IsNotFound(err error) bool {
 	return err == ErrKeyNotFound
+}
+
+type Keyring struct {
+	*openpgp.Pubkey
+
+	CTime time.Time
+	MTime time.Time
+}
+
+// Storage defines the API that is needed to implement a complete storage
+// backend for an HKP service.
+type Storage interface {
+	Queryer
+	Updater
+	Notifier
 }
 
 // Queryer defines the storage API for search and retrieval of public key material.
@@ -46,8 +64,11 @@ type Queryer interface {
 	// different implementations.
 	MatchKeyword([]string) ([]string, error)
 
-	// FetchKeys returns the public key packet models matching the given RFingerprint slice.
+	// FetchKeys returns the public key material matching the given RFingerprint slice.
 	FetchKeys([]string) ([]*openpgp.Pubkey, error)
+
+	// FetchKeyrings returns the keyring records matching the given RFingerprint slice.
+	FetchKeyrings([]string) ([]*Keyring, error)
 }
 
 // Inserter defines the storage API for inserting key material.
@@ -66,9 +87,77 @@ type Updater interface {
 	Update(*openpgp.Pubkey) error
 }
 
-// Storage defines the API that is needed to implement a complete storage
-// backend for an HKP service.
-type Storage interface {
-	Queryer
-	Updater
+type Notifier interface {
+	// Subscribe registers a key change callback function.
+	Subscribe(func(KeyChange) error)
+
+	// Notify invokes all registered callbacks with a key change notification.
+	Notify(change KeyChange) error
+}
+
+type KeyChange interface {
+	InsertDigests() []string
+	RemoveDigests() []string
+}
+
+type KeyAdded struct {
+	Digest string
+}
+
+func (ka KeyAdded) InsertDigests() []string {
+	return []string{ka.Digest}
+}
+
+func (ka KeyAdded) RemoveDigests() []string {
+	return nil
+}
+
+type KeyReplaced struct {
+	OldDigest string
+	NewDigest string
+}
+
+func (kr KeyReplaced) InsertDigests() []string {
+	return []string{kr.NewDigest}
+}
+
+func (kr KeyReplaced) RemoveDigests() []string {
+	return []string{kr.OldDigest}
+}
+
+type KeyNotChanged struct{}
+
+func (knc KeyNotChanged) InsertDigests() []string { return nil }
+
+func (knc KeyNotChanged) RemoveDigests() []string { return nil }
+
+func UpsertKey(storage Storage, pubkey *openpgp.Pubkey) (kc KeyChange, err error) {
+	defer func() {
+		if err == nil {
+			err = storage.Notify(kc)
+		}
+	}()
+
+	lastKeys, err := storage.FetchKeys([]string{pubkey.RFingerprint})
+	if len(lastKeys) == 0 || IsNotFound(err) {
+		err = storage.Insert([]*openpgp.Pubkey{pubkey})
+		if err != nil {
+			return nil, errgo.Mask(err)
+		}
+		return KeyAdded{Digest: pubkey.MD5}, nil
+	}
+	lastKey := lastKeys[0]
+	lastMD5 := lastKey.MD5
+	err = openpgp.Merge(lastKey, pubkey)
+	if err != nil {
+		return nil, errgo.Mask(err)
+	}
+	if lastMD5 != lastKey.MD5 {
+		err = storage.Update(lastKey)
+		if err != nil {
+			return nil, errgo.Mask(err)
+		}
+		return KeyReplaced{OldDigest: lastMD5, NewDigest: lastKey.MD5}, nil
+	}
+	return KeyNotChanged{}, nil
 }
