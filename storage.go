@@ -64,6 +64,10 @@ type Queryer interface {
 	// different implementations.
 	MatchKeyword([]string) ([]string, error)
 
+	// ModifiedSince returns matching RFingerprint IDs for keyrings modified
+	// since the given time.
+	ModifiedSince(time.Time) ([]string, error)
+
 	// FetchKeys returns the public key material matching the given RFingerprint slice.
 	FetchKeys([]string) ([]*openpgp.Pubkey, error)
 

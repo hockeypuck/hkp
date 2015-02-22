@@ -19,6 +19,7 @@ package pks
 
 import (
 	"bytes"
+	"net"
 	"net/smtp"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"gopkg.in/errgo.v1"
 	"gopkg.in/hockeypuck/hkp.v0"
 	log "gopkg.in/hockeypuck/logrus.v0"
+	"gopkg.in/hockeypuck/openpgp.v0"
 	"gopkg.in/tomb.v2"
 )
 
@@ -75,7 +77,7 @@ type Sender struct {
 }
 
 // Initialize from command line switches if fields not set.
-func NewServer(hkpStorage hkp.Storage, pksStorage Storage, config *Config) (*PksSync, error) {
+func NewSender(hkpStorage hkp.Storage, pksStorage Storage, config *Config) (*Sender, error) {
 	if config == nil {
 		return nil, errgo.New("PKS mail synchronization not configured")
 	}
@@ -146,7 +148,7 @@ func (sender *Sender) SendKeys(status *Status) error {
 }
 
 // Email an updated public key to a PKS server.
-func (ps *PksSync) SendKey(addr string, key *Pubkey) error {
+func (sender *Sender) SendKey(addr string, key *Pubkey) error {
 	var msg bytes.Buffer
 	msg.WriteString("Subject: ADD\n\n")
 	openpgp.WriteArmoredPackets(&msg, key)
@@ -155,7 +157,7 @@ func (ps *PksSync) SendKey(addr string, key *Pubkey) error {
 }
 
 // Poll PKS downstream servers
-func (ps *PksSync) run() error {
+func (sender *Sender) run() error {
 	delay := 1
 	timer := time.NewTimer(time.Duration(delay) * time.Minute)
 	for {
@@ -196,11 +198,11 @@ func (ps *PksSync) run() error {
 }
 
 // Start PKS synchronization
-func (sender *PksSync) Start() {
+func (sender *Sender) Start() {
 	sender.t.Go(sender.run)
 }
 
-func (ps *PksSync) Stop() error {
+func (sender *Sender) Stop() error {
 	sender.t.Kill(nil)
 	return sender.t.Wait()
 }
