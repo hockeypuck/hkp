@@ -28,15 +28,14 @@ import (
 	"github.com/julienschmidt/httprouter"
 	"golang.org/x/crypto/openpgp/armor"
 	"gopkg.in/errgo.v1"
+
 	"gopkg.in/hockeypuck/conflux.v2/recon"
 	log "gopkg.in/hockeypuck/logrus.v0"
 	"gopkg.in/hockeypuck/openpgp.v0"
-	"gopkg.in/statsd.v1"
 )
 
 func httpError(w http.ResponseWriter, statusCode int, err error) {
 	log.Errorf("HTTP %d: %v", statusCode, err)
-	statsd.Increment(fmt.Sprintf("hkp.error.%d", statusCode), 1, 1)
 	http.Error(w, http.StatusText(statusCode), statusCode)
 }
 
