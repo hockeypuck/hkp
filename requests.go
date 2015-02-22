@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"gopkg.in/errgo.v1"
+
 	"gopkg.in/hockeypuck/conflux.v2/recon"
 )
 
