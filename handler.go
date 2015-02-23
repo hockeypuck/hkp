@@ -193,7 +193,7 @@ func mrTimeString(t time.Time) string {
 func (h *Handler) indexMR(w http.ResponseWriter, keys []*openpgp.Pubkey, l *Lookup) {
 	w.Header().Set("Content-Type", "text/plain")
 
-	fmt.Fprintln(w, "info:1:1")
+	fmt.Fprintf(w, "info:1:%d\n", len(keys))
 	for _, key := range keys {
 		selfsigs := key.SelfSigs()
 		if !selfsigs.Valid() {
@@ -210,7 +210,7 @@ func (h *Handler) indexMR(w http.ResponseWriter, keys []*openpgp.Pubkey, l *Look
 
 		expiresAt, _ := selfsigs.ExpiresAt()
 
-		fmt.Fprintln(w, "pub:%s:%d:%d:%d:%s:", keyID, key.Algorithm, key.BitLen,
+		fmt.Fprintf(w, "pub:%s:%d:%d:%d:%s:\n", keyID, key.Algorithm, key.BitLen,
 			key.Creation.Unix(), mrTimeString(expiresAt))
 
 		for _, uid := range key.UserIDs {
@@ -220,7 +220,7 @@ func (h *Handler) indexMR(w http.ResponseWriter, keys []*openpgp.Pubkey, l *Look
 				continue
 			}
 			expiresAt, _ := selfsigs.ExpiresAt()
-			fmt.Fprintf(w, "uid:%s:%d:%s:", strings.Replace(uid.Keywords, ":", "%3a", -1),
+			fmt.Fprintf(w, "uid:%s:%d:%s:\n", strings.Replace(uid.Keywords, ":", "%3a", -1),
 				validSince.Unix(), mrTimeString(expiresAt))
 		}
 	}

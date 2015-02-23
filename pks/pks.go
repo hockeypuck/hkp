@@ -119,8 +119,8 @@ func (sender *Sender) initStatus() error {
 	return nil
 }
 
-func (sender *Sender) SendKeys(status *Status) error {
-	uuids, err := sender.hkpStorage.MatchAddedAfter(status.LastSync)
+func (sender *Sender) SendKeys(status Status) error {
+	uuids, err := sender.hkpStorage.ModifiedSince(status.LastSync)
 	if err != nil {
 		return errgo.Mask(err)
 	}
@@ -148,10 +148,10 @@ func (sender *Sender) SendKeys(status *Status) error {
 }
 
 // Email an updated public key to a PKS server.
-func (sender *Sender) SendKey(addr string, key *Pubkey) error {
+func (sender *Sender) SendKey(addr string, key *openpgp.Pubkey) error {
 	var msg bytes.Buffer
 	msg.WriteString("Subject: ADD\n\n")
-	openpgp.WriteArmoredPackets(&msg, key)
+	openpgp.WriteArmoredPackets(&msg, []*openpgp.Pubkey{key})
 	return smtp.SendMail(sender.config.SMTP.Host, sender.smtpAuth,
 		sender.config.From, []string{addr}, msg.Bytes())
 }
@@ -167,13 +167,13 @@ func (sender *Sender) run() error {
 		case <-timer.C:
 		}
 
-		statuses, err := sender.Status()
+		statuses, err := sender.pksStorage.All()
 		if err != nil {
 			log.Errorf("failed to obtain PKS sync status: %v", err)
 			goto DELAY
 		}
 		for _, status := range statuses {
-			err = sender.SendKeys(&status)
+			err = sender.SendKeys(status)
 			if err != nil {
 				// Increase delay backoff
 				delay++
