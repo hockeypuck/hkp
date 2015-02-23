@@ -20,8 +20,9 @@ package mock
 import (
 	"time"
 
-	"gopkg.in/hockeypuck/hkp.v0"
 	"gopkg.in/hockeypuck/openpgp.v0"
+
+	"gopkg.in/hockeypuck/hkp.v0/storage"
 )
 
 type MethodCall struct {
@@ -40,7 +41,7 @@ func (m *Recorder) record(name string, args ...interface{}) {
 type resolverFunc func([]string) ([]string, error)
 type modifiedSinceFunc func(time.Time) ([]string, error)
 type fetchKeysFunc func([]string) ([]*openpgp.Pubkey, error)
-type fetchKeyringsFunc func([]string) ([]*hkp.Keyring, error)
+type fetchKeyringsFunc func([]string) ([]*storage.Keyring, error)
 type insertFunc func([]*openpgp.Pubkey) error
 type updateFunc func(*openpgp.Pubkey) error
 
@@ -55,7 +56,7 @@ type Storage struct {
 	insert        insertFunc
 	update        updateFunc
 
-	notified []func(hkp.KeyChange) error
+	notified []func(storage.KeyChange) error
 }
 
 type Option func(*Storage)
@@ -118,7 +119,7 @@ func (m *Storage) FetchKeys(s []string) ([]*openpgp.Pubkey, error) {
 	}
 	return nil, nil
 }
-func (m *Storage) FetchKeyrings(s []string) ([]*hkp.Keyring, error) {
+func (m *Storage) FetchKeyrings(s []string) ([]*storage.Keyring, error) {
 	m.record("FetchKeyrings", s)
 	if m.fetchKeyrings != nil {
 		return m.fetchKeyrings(s)
@@ -139,10 +140,10 @@ func (m *Storage) Update(key *openpgp.Pubkey) error {
 	}
 	return nil
 }
-func (m *Storage) Subscribe(f func(hkp.KeyChange) error) {
+func (m *Storage) Subscribe(f func(storage.KeyChange) error) {
 	m.notified = append(m.notified, f)
 }
-func (m *Storage) Notify(change hkp.KeyChange) error {
+func (m *Storage) Notify(change storage.KeyChange) error {
 	for _, cb := range m.notified {
 		err := cb(change)
 		if err != nil {

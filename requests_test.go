@@ -1,3 +1,5 @@
+// +build ignore
+
 /*
    Hockeypuck - OpenPGP key server
    Copyright (C) 2012-2014  Casey Marshall

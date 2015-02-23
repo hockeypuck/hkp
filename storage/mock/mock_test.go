@@ -15,14 +15,15 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-package mock
+package mock_test
 
 import (
 	"testing"
 
 	gc "gopkg.in/check.v1"
 
-	hkp "gopkg.in/hockeypuck/hkp.v0"
+	"gopkg.in/hockeypuck/hkp.v0/storage"
+	"gopkg.in/hockeypuck/hkp.v0/storage/mock"
 )
 
 func Test(t *testing.T) { gc.TestingT(t) }
@@ -31,10 +32,10 @@ type MockSuite struct{}
 
 var _ = gc.Suite(&MockSuite{})
 
-var _ hkp.Storage = (*Storage)(nil)
+var _ storage.Storage = (*mock.Storage)(nil)
 
 func (*MockSuite) TestMatchMD5(c *gc.C) {
-	m := NewStorage(MatchMD5(func([]string) ([]string, error) { return []string{"foo", "bar"}, nil }))
+	m := mock.NewStorage(mock.MatchMD5(func([]string) ([]string, error) { return []string{"foo", "bar"}, nil }))
 	ids, err := m.MatchMD5(nil)
 	c.Assert(ids, gc.DeepEquals, []string{"foo", "bar"})
 	c.Assert(err, gc.IsNil)

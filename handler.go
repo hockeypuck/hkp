@@ -32,6 +32,8 @@ import (
 	"gopkg.in/hockeypuck/conflux.v2/recon"
 	log "gopkg.in/hockeypuck/logrus.v0"
 	"gopkg.in/hockeypuck/openpgp.v0"
+
+	"gopkg.in/hockeypuck/hkp.v0/storage"
 )
 
 func httpError(w http.ResponseWriter, statusCode int, err error) {
@@ -40,12 +42,12 @@ func httpError(w http.ResponseWriter, statusCode int, err error) {
 }
 
 type Handler struct {
-	storage Storage
+	storage storage.Storage
 }
 
 type HandlerOption func(h *Handler) error
 
-func NewHandler(storage Storage) *Handler {
+func NewHandler(storage storage.Storage) *Handler {
 	return &Handler{storage: storage}
 }
 
@@ -256,7 +258,7 @@ func (h *Handler) Add(w http.ResponseWriter, r *http.Request, _ httprouter.Param
 			httpError(w, http.StatusInternalServerError, errgo.Mask(err))
 			return
 		}
-		change, err := UpsertKey(h.storage, readKey.Pubkey)
+		change, err := storage.UpsertKey(h.storage, readKey.Pubkey)
 		if err != nil {
 			httpError(w, http.StatusInternalServerError, errgo.Mask(err))
 			return
@@ -264,11 +266,11 @@ func (h *Handler) Add(w http.ResponseWriter, r *http.Request, _ httprouter.Param
 
 		fp := readKey.Pubkey.QualifiedFingerprint()
 		switch change.(type) {
-		case KeyAdded:
+		case storage.KeyAdded:
 			result.Inserted = append(result.Inserted, fp)
-		case KeyReplaced:
+		case storage.KeyReplaced:
 			result.Updated = append(result.Updated, fp)
-		case KeyNotChanged:
+		case storage.KeyNotChanged:
 			result.Ignored = append(result.Ignored, fp)
 		}
 	}
