@@ -29,13 +29,15 @@ import (
 	"time"
 
 	"gopkg.in/errgo.v1"
+	"gopkg.in/tomb.v2"
+
 	cf "gopkg.in/hockeypuck/conflux.v2"
 	"gopkg.in/hockeypuck/conflux.v2/recon"
 	"gopkg.in/hockeypuck/conflux.v2/recon/leveldb"
-	"gopkg.in/hockeypuck/hkp.v0"
 	log "gopkg.in/hockeypuck/logrus.v0"
 	"gopkg.in/hockeypuck/openpgp.v0"
-	"gopkg.in/tomb.v2"
+
+	"gopkg.in/hockeypuck/hkp.v0/storage"
 )
 
 const requestChunkSize = 100
@@ -51,10 +53,10 @@ type Settings struct {
 
 type Peer struct {
 	peer       *recon.Peer
-	storage    hkp.Storage
-	settings   *hockeypuck.Settings
+	storage    storage.Storage
+	settings   *Settings
 	ptree      recon.PrefixTree
-	keyChanges chan hkp.KeyChange
+	keyChanges chan storage.KeyChange
 
 	t tomb.Tomb
 
@@ -73,7 +75,7 @@ func newSksPTree(s *Settings) (recon.PrefixTree, error) {
 	return leveldb.New(s.PTreeConfig, s.Path)
 }
 
-func NewPeer(storage hkp.Storage, s *Settings) (*Peer, error) {
+func NewPeer(hkpStorage storage.Storage, s *Settings) (*Peer, error) {
 	ptree, err := newSksPTree(s)
 	if err != nil {
 		return nil, errgo.Mask(err)
@@ -86,10 +88,10 @@ func NewPeer(storage hkp.Storage, s *Settings) (*Peer, error) {
 	peer := recon.NewPeer(&s.Settings, ptree)
 	sksPeer := &Peer{
 		ptree:           ptree,
-		storage:         storage,
+		storage:         hkpStorage,
 		settings:        s,
 		peer:            peer,
-		keyChanges:      make(chan KeyChange),
+		keyChanges:      make(chan storage.KeyChange),
 		recoverAttempts: make(keyRecoveryCounter),
 	}
 	return sksPeer, nil
@@ -132,7 +134,7 @@ func DigestZp(digest string) (*cf.Zp, error) {
 	return cf.Zb(cf.P_SKS, buf), nil
 }
 
-func (r *Peer) notifyKeyChange(change KeyChange) {
+func (r *Peer) notifyKeyChange(change storage.KeyChange) {
 	if r != nil {
 		r.keyChanges <- change
 	}
@@ -158,7 +160,7 @@ func (r *Peer) clearRecoverAttempts(z *cf.Zp) {
 	delete(r.recoverAttempts, z.String())
 }
 
-func (r *Peer) updateDigests(change KeyChange) error {
+func (r *Peer) updateDigests(change storage.KeyChange) error {
 	for _, digest := range change.InsertDigests() {
 		digestZp, err := DigestZp(digest)
 		if err != nil {
@@ -273,7 +275,7 @@ func (r *Peer) workRecovered(rcvr *recon.Recover, ready workRecoveredReady, work
 				if err != nil {
 					log.Warn(err)
 				}
-				timer.Reset(time.Duration(r.settings.Conflux.Recon.GossipIntervalSecs) * time.Second)
+				timer.Reset(time.Duration(r.settings.GossipIntervalSecs) * time.Second)
 			}()
 		case <-timer.C:
 			timer.Stop()
@@ -405,7 +407,7 @@ func (r *Peer) upsertKeys(buf []byte) error {
 		if err != nil {
 			return errgo.Mask(err)
 		}
-		change, err := hkp.UpsertKey(r.storage, readKey.Pubkey)
+		change, err := storage.UpsertKey(r.storage, readKey.Pubkey)
 		if err != nil {
 			return errgo.Mask(err)
 		}

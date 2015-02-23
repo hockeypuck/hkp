@@ -25,10 +25,12 @@ import (
 	"time"
 
 	"gopkg.in/errgo.v1"
-	"gopkg.in/hockeypuck/hkp.v0"
+	"gopkg.in/tomb.v2"
+
 	log "gopkg.in/hockeypuck/logrus.v0"
 	"gopkg.in/hockeypuck/openpgp.v0"
-	"gopkg.in/tomb.v2"
+
+	"gopkg.in/hockeypuck/hkp.v0/storage"
 )
 
 // Max delay backoff multiplier when there are SMTP errors.
@@ -68,7 +70,7 @@ type Storage interface {
 // Basic implementation of outbound PKS synchronization
 type Sender struct {
 	config     *Config
-	hkpStorage hkp.Storage
+	hkpStorage storage.Storage
 	pksStorage Storage
 	smtpAuth   smtp.Auth
 	lastStatus []Status
@@ -77,7 +79,7 @@ type Sender struct {
 }
 
 // Initialize from command line switches if fields not set.
-func NewSender(hkpStorage hkp.Storage, pksStorage Storage, config *Config) (*Sender, error) {
+func NewSender(hkpStorage storage.Storage, pksStorage Storage, config *Config) (*Sender, error) {
 	if config == nil {
 		return nil, errgo.New("PKS mail synchronization not configured")
 	}
