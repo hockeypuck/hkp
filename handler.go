@@ -228,6 +228,12 @@ func (h *Handler) indexMR(w http.ResponseWriter, keys []*openpgp.Pubkey, l *Look
 	}
 }
 
+type AddResponse struct {
+	Inserted []string `json:"inserted"`
+	Updated  []string `json:"updated"`
+	Ignored  []string `json:"ignored"`
+}
+
 func (h *Handler) Add(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	add, err := ParseAdd(r)
 	if err != nil {
@@ -242,12 +248,7 @@ func (h *Handler) Add(w http.ResponseWriter, r *http.Request, _ httprouter.Param
 		return
 	}
 
-	var result struct {
-		Inserted []string `json:"inserted"`
-		Updated  []string `json:"updated"`
-		Ignored  []string `json:"ignored"`
-	}
-
+	var result AddResponse
 	for readKey := range openpgp.ReadKeys(armorBlock.Body) {
 		if readKey.Error != nil {
 			httpError(w, http.StatusBadRequest, errgo.Mask(err))

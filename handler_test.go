@@ -24,6 +24,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	stdtesting "testing"
 
 	"github.com/julienschmidt/httprouter"
@@ -64,18 +65,51 @@ func (s *HandlerSuite) TearDownTest(c *gc.C) {
 	s.srv.Close()
 }
 
-func (s *HandlerSuite) TestGetAlice(c *gc.C) {
+func (s *HandlerSuite) TestGetKeyID(c *gc.C) {
 	res, err := http.Get(s.srv.URL + "/pks/lookup?op=get&search=0x23e0dcca")
 	c.Assert(err, gc.IsNil)
 	armor, err := ioutil.ReadAll(res.Body)
 	res.Body.Close()
 	c.Assert(err, gc.IsNil)
+	c.Assert(res.StatusCode, gc.Equals, http.StatusOK)
 
 	keys := openpgp.MustReadArmorKeys(bytes.NewBuffer(armor)).MustParse()
 	c.Assert(keys, gc.HasLen, 1)
 	c.Assert(keys[0].ShortID(), gc.Equals, "23e0dcca")
 	c.Assert(keys[0].UserIDs, gc.HasLen, 1)
 	c.Assert(keys[0].UserIDs[0].Keywords, gc.Equals, "alice <alice@example.com>")
+
+	c.Assert(s.storage.MethodCount("MatchMD5"), gc.Equals, 0)
+	c.Assert(s.storage.MethodCount("Resolve"), gc.Equals, 1)
+	c.Assert(s.storage.MethodCount("MatchKeyword"), gc.Equals, 0)
+	c.Assert(s.storage.MethodCount("FetchKeys"), gc.Equals, 1)
+}
+
+func (s *HandlerSuite) TestGetKeyword(c *gc.C) {
+	res, err := http.Get(s.srv.URL + "/pks/lookup?op=get&search=alice")
+	c.Assert(err, gc.IsNil)
+	defer res.Body.Close()
+	c.Assert(err, gc.IsNil)
+	c.Assert(res.StatusCode, gc.Equals, http.StatusOK)
+
+	c.Assert(s.storage.MethodCount("MatchMD5"), gc.Equals, 0)
+	c.Assert(s.storage.MethodCount("Resolve"), gc.Equals, 0)
+	c.Assert(s.storage.MethodCount("MatchKeyword"), gc.Equals, 1)
+	c.Assert(s.storage.MethodCount("FetchKeys"), gc.Equals, 1)
+}
+
+func (s *HandlerSuite) TestGetMD5(c *gc.C) {
+	// fake MD5, this is a mock
+	res, err := http.Get(s.srv.URL + "/pks/lookup?op=hget&search=f49fba8f60c4957725dd97faa4b94647")
+	c.Assert(err, gc.IsNil)
+	defer res.Body.Close()
+	c.Assert(err, gc.IsNil)
+	c.Assert(res.StatusCode, gc.Equals, http.StatusOK)
+
+	c.Assert(s.storage.MethodCount("MatchMD5"), gc.Equals, 1)
+	c.Assert(s.storage.MethodCount("Resolve"), gc.Equals, 0)
+	c.Assert(s.storage.MethodCount("MatchKeyword"), gc.Equals, 0)
+	c.Assert(s.storage.MethodCount("FetchKeys"), gc.Equals, 1)
 }
 
 func (s *HandlerSuite) TestIndexAlice(c *gc.C) {
@@ -85,6 +119,7 @@ func (s *HandlerSuite) TestIndexAlice(c *gc.C) {
 		doc, err := ioutil.ReadAll(res.Body)
 		res.Body.Close()
 		c.Assert(err, gc.IsNil)
+		c.Assert(res.StatusCode, gc.Equals, http.StatusOK)
 
 		var result []map[string]interface{}
 		err = json.Unmarshal(doc, &result)
@@ -93,6 +128,11 @@ func (s *HandlerSuite) TestIndexAlice(c *gc.C) {
 		c.Assert(result, gc.HasLen, 1)
 		c.Assert(fmt.Sprintf("%v", result[0]["BitLen"]), gc.Equals, "2048")
 	}
+
+	c.Assert(s.storage.MethodCount("MatchMD5"), gc.Equals, 0)
+	c.Assert(s.storage.MethodCount("MatchKeyword"), gc.Equals, 0)
+	c.Assert(s.storage.MethodCount("Resolve"), gc.Equals, 2)
+	c.Assert(s.storage.MethodCount("FetchKeys"), gc.Equals, 2)
 }
 
 func (s *HandlerSuite) TestIndexAliceMR(c *gc.C) {
@@ -101,9 +141,56 @@ func (s *HandlerSuite) TestIndexAliceMR(c *gc.C) {
 	doc, err := ioutil.ReadAll(res.Body)
 	res.Body.Close()
 	c.Assert(err, gc.IsNil)
+	c.Assert(res.StatusCode, gc.Equals, http.StatusOK)
 
 	c.Assert(string(doc), gc.Equals, `info:1:1
 pub:361BC1F023E0DCCA:1:2048:1345589945::
 uid:alice <alice@example.com>:1345589945::
 `)
+}
+
+func (s *HandlerSuite) TestBadOp(c *gc.C) {
+	for _, op := range []string{"", "?op=explode"} {
+		res, err := http.Get(s.srv.URL + "/pks/lookup" + op)
+		c.Assert(err, gc.IsNil)
+		defer res.Body.Close()
+		c.Assert(res.StatusCode, gc.Equals, http.StatusBadRequest)
+	}
+}
+
+func (s *HandlerSuite) TestMissingSearch(c *gc.C) {
+	for _, op := range []string{"get", "index", "vindex", "index&options=mr", "vindex&options=mr"} {
+		res, err := http.Get(s.srv.URL + "/pks/lookup?op=" + op)
+		c.Assert(err, gc.IsNil)
+		defer res.Body.Close()
+		c.Assert(res.StatusCode, gc.Equals, http.StatusBadRequest)
+	}
+}
+
+func (s *HandlerSuite) TestAddMismatch(c *gc.C) {
+	keytext, err := ioutil.ReadAll(testing.MustInput("uat.asc"))
+	c.Assert(err, gc.IsNil)
+	res, err := http.PostForm(s.srv.URL+"/pks/add", url.Values{
+		"keytext": []string{string(keytext)},
+	})
+	c.Assert(err, gc.IsNil)
+	c.Assert(res.StatusCode, gc.Equals, http.StatusInternalServerError)
+}
+
+func (s *HandlerSuite) TestAdd(c *gc.C) {
+	keytext, err := ioutil.ReadAll(testing.MustInput("alice_unsigned.asc"))
+	c.Assert(err, gc.IsNil)
+	res, err := http.PostForm(s.srv.URL+"/pks/add", url.Values{
+		"keytext": []string{string(keytext)},
+	})
+	c.Assert(err, gc.IsNil)
+	c.Assert(res.StatusCode, gc.Equals, http.StatusOK)
+	defer res.Body.Close()
+	doc, err := ioutil.ReadAll(res.Body)
+	c.Assert(err, gc.IsNil)
+
+	var addRes AddResponse
+	err = json.Unmarshal(doc, &addRes)
+	c.Assert(err, gc.IsNil)
+	c.Assert(addRes.Ignored, gc.HasLen, 1)
 }

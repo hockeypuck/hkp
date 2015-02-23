@@ -151,6 +151,9 @@ func UpsertKey(storage Storage, pubkey *openpgp.Pubkey) (kc KeyChange, err error
 		return KeyAdded{Digest: pubkey.MD5}, nil
 	}
 	lastKey := lastKeys[0]
+	if pubkey.UUID != lastKey.UUID {
+		return nil, errgo.Newf("upsert key %q lookup failed, found mismatch %q", pubkey.UUID, lastKey.UUID)
+	}
 	lastMD5 := lastKey.MD5
 	err = openpgp.Merge(lastKey, pubkey)
 	if err != nil {

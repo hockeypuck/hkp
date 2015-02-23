@@ -38,6 +38,16 @@ func (m *Recorder) record(name string, args ...interface{}) {
 	m.Calls = append(m.Calls, MethodCall{Name: name, Args: args})
 }
 
+func (m *Recorder) MethodCount(name string) int {
+	var n int
+	for _, call := range m.Calls {
+		if name == call.Name {
+			n++
+		}
+	}
+	return n
+}
+
 type resolverFunc func([]string) ([]string, error)
 type modifiedSinceFunc func(time.Time) ([]string, error)
 type fetchKeysFunc func([]string) ([]*openpgp.Pubkey, error)
