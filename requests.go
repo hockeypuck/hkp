@@ -62,7 +62,9 @@ func ParseOptionSet(s string) OptionSet {
 	result := OptionSet{}
 	fields := strings.Split(s, ",")
 	for _, field := range fields {
-		result[Option(field)] = true
+		if field != "" {
+			result[Option(field)] = true
+		}
 	}
 	return result
 }

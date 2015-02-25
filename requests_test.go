@@ -1,5 +1,3 @@
-// +build ignore
-
 /*
    Hockeypuck - OpenPGP key server
    Copyright (C) 2012-2014  Casey Marshall
@@ -23,9 +21,8 @@ import (
 	"bytes"
 	"net/http"
 	"net/url"
-	"testing"
 
-	"github.com/stretchr/testify/assert"
+	gc "gopkg.in/check.v1"
 )
 
 /*
@@ -33,136 +30,131 @@ import (
 	of requests and responses.
 */
 
-func TestGetKeyword(t *testing.T) {
+type RequestsSuite struct{}
+
+var _ = gc.Suite(&RequestsSuite{})
+
+func (s *RequestsSuite) TestGetKeyword(c *gc.C) {
 	// basic search
 	testUrl, err := url.Parse("/pks/lookup?op=get&search=alice")
-	assert.Equal(t, err, nil)
+	c.Assert(err, gc.IsNil)
 	req := &http.Request{
 		Method: "GET",
 		URL:    testUrl}
-	lookup := &Lookup{Request: req}
-	err = lookup.Parse()
-	assert.Equal(t, err, nil)
-	assert.Equal(t, Get, lookup.Op)
-	assert.Equal(t, "alice", lookup.Search)
-	assert.Equal(t, NoOption, lookup.Option)
-	assert.Equal(t, false, lookup.Fingerprint)
-	assert.Equal(t, false, lookup.Exact)
+	lookup, err := ParseLookup(req)
+	c.Assert(err, gc.IsNil)
+	c.Assert(OperationGet, gc.Equals, lookup.Op)
+	c.Assert("alice", gc.Equals, lookup.Search)
+	c.Assert(lookup.Options, gc.HasLen, 0)
+	c.Assert(lookup.Fingerprint, gc.Equals, false)
+	c.Assert(lookup.Exact, gc.Equals, false)
 }
 
-func TestGetFp(t *testing.T) {
+func (s *RequestsSuite) TestGetFp(c *gc.C) {
 	// fp search
 	testUrl, err := url.Parse("/pks/lookup?op=get&search=0xdecafbad&options=mr,nm&fingerprint=on&exact=on")
-	assert.Equal(t, err, nil)
+	c.Assert(err, gc.IsNil)
 	req := &http.Request{
 		Method: "GET",
 		URL:    testUrl}
-	lookup := &Lookup{Request: req}
-	err = lookup.Parse()
-	assert.Equal(t, err, nil)
-	assert.Equal(t, Get, lookup.Op)
-	assert.Equal(t, "0xdecafbad", lookup.Search)
-	assert.Equal(t, MachineReadable&lookup.Option, MachineReadable)
-	assert.Equal(t, NotModifiable&lookup.Option, NotModifiable)
-	assert.Equal(t, true, lookup.Fingerprint)
-	assert.Equal(t, true, lookup.Exact)
+	lookup, err := ParseLookup(req)
+	c.Assert(err, gc.IsNil)
+	c.Assert(OperationGet, gc.Equals, lookup.Op)
+	c.Assert("0xdecafbad", gc.Equals, lookup.Search)
+	c.Assert(lookup.Options[OptionMachineReadable], gc.Equals, true)
+	c.Assert(lookup.Options[OptionNotModifiable], gc.Equals, true)
+	c.Assert(lookup.Fingerprint, gc.Equals, true)
+	c.Assert(lookup.Exact, gc.Equals, true)
 }
 
-func TestIndex(t *testing.T) {
+func (s *RequestsSuite) TestIndex(c *gc.C) {
 	// op=index
 	testUrl, err := url.Parse("/pks/lookup?op=index&search=sharin") // as in, foo
-	assert.Equal(t, err, nil)
+	c.Assert(err, gc.IsNil)
 	req := &http.Request{
 		Method: "GET",
 		URL:    testUrl}
-	lookup := &Lookup{Request: req}
-	err = lookup.Parse()
-	assert.Equal(t, err, nil)
-	assert.Equal(t, Index, lookup.Op)
+	lookup, err := ParseLookup(req)
+	c.Assert(err, gc.IsNil)
+	c.Assert(lookup.Op, gc.Equals, OperationIndex)
 }
 
-func TestVindex(t *testing.T) {
+func (s *RequestsSuite) TestVindex(c *gc.C) {
 	// op=vindex
 	testUrl, err := url.Parse("/pks/lookup?op=vindex&search=bob") // as in, foo
-	assert.Equal(t, err, nil)
+	c.Assert(err, gc.IsNil)
 	req := &http.Request{
 		Method: "GET",
 		URL:    testUrl}
-	lookup := &Lookup{Request: req}
-	lookup.Parse()
-	assert.Equal(t, err, nil)
-	assert.Equal(t, Vindex, lookup.Op)
+	lookup, err := ParseLookup(req)
+	c.Assert(err, gc.IsNil)
+	c.Assert(OperationVIndex, gc.Equals, lookup.Op)
 }
 
-func TestMissingSearch(t *testing.T) {
+func (s *RequestsSuite) TestMissingSearch(c *gc.C) {
 	// create an op=get lookup without the required search term
 	testUrl, err := url.Parse("/pks/lookup?op=get")
-	assert.Equal(t, err, nil)
+	c.Assert(err, gc.IsNil)
 	req := &http.Request{
 		Method: "GET",
 		URL:    testUrl}
-	lookup := &Lookup{Request: req}
-	err = lookup.Parse()
+	_, err = ParseLookup(req)
 	// error without search term
-	assert.NotEqual(t, err, nil)
+	c.Assert(err, gc.NotNil)
 }
 
-func TestNoSuchOp(t *testing.T) {
+func (s *RequestsSuite) TestNoSuchOp(c *gc.C) {
 	// hockeypuck does not know how to do a barrel roll
 	testUrl, err := url.Parse("/pks/lookup?op=barrelroll")
-	assert.Equal(t, err, nil)
+	c.Assert(err, gc.IsNil)
 	req := &http.Request{
 		Method: "GET",
 		URL:    testUrl}
-	lookup := &Lookup{Request: req}
-	err = lookup.Parse()
+	_, err = ParseLookup(req)
 	// Unknown operation
-	assert.NotEqual(t, err, nil)
+	c.Assert(err, gc.NotNil)
 }
 
-func TestAdd(t *testing.T) {
+func (s *RequestsSuite) TestAdd(c *gc.C) {
 	// adding a key
 	testUrl, err := url.Parse("/pks/add")
-	assert.Equal(t, err, nil)
+	c.Assert(err, gc.IsNil)
 	postData := make(map[string][]string)
 	postData["keytext"] = []string{"sus llaves aqui"}
 	req, err := http.NewRequest("POST", testUrl.String(), bytes.NewBuffer(nil))
 	req.PostForm = url.Values(postData)
-	add := &Add{Request: req}
-	err = add.Parse()
-	assert.Equal(t, err, nil)
-	assert.Equal(t, "sus llaves aqui", add.Keytext)
-	assert.Equal(t, NoOption, add.Option)
+	add, err := ParseAdd(req)
+	c.Assert(err, gc.IsNil)
+	c.Assert("sus llaves aqui", gc.Equals, add.Keytext)
+	c.Assert(add.Options, gc.HasLen, 0)
 }
 
-func TestAddOptions(t *testing.T) {
+func (s *RequestsSuite) TestAddOptions(c *gc.C) {
 	// adding a key with options
 	testUrl, err := url.Parse("/pks/add?options=mr")
-	assert.Equal(t, err, nil)
+	c.Assert(err, gc.IsNil)
 	postData := make(map[string][]string)
 	postData["keytext"] = []string{"sus llaves estan aqui"}
 	postData["options"] = []string{"mr"}
 	req, err := http.NewRequest("POST", testUrl.String(), bytes.NewBuffer(nil))
 	req.PostForm = url.Values(postData)
-	add := &Add{Request: req}
-	err = add.Parse()
-	assert.Equal(t, err, nil)
-	assert.Equal(t, "sus llaves estan aqui", add.Keytext)
-	assert.Equal(t, MachineReadable&add.Option, MachineReadable)
-	assert.Equal(t, NotModifiable&add.Option, NoOption)
+	add, err := ParseAdd(req)
+	c.Assert(err, gc.IsNil)
+	c.Assert("sus llaves estan aqui", gc.Equals, add.Keytext)
+	c.Assert(add.Options[OptionMachineReadable], gc.Equals, true)
+	c.Assert(add.Options[OptionNotModifiable], gc.Equals, false)
 }
 
-func TestAddMissingKey(t *testing.T) {
+func (s *RequestsSuite) TestAddMissingKey(c *gc.C) {
 	// here's my key. wait, i forgot it.
 	testUrl, err := url.Parse("/pks/add")
-	assert.Equal(t, err, nil)
+	c.Assert(err, gc.IsNil)
 	postData := make(map[string][]string)
 	req := &http.Request{
 		Method: "POST",
 		URL:    testUrl,
 		Form:   url.Values(postData)}
-	add := &Add{Request: req}
-	err = add.Parse()
+	_, err = ParseAdd(req)
 	// error without keytext
-	assert.NotEqual(t, err, nil)
+	c.Assert(err, gc.NotNil)
 }
