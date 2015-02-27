@@ -87,8 +87,10 @@ type Inserter interface {
 type Updater interface {
 	Inserter
 
-	// Update updates the stored Pubkey with the given contents.
-	Update(*openpgp.Pubkey) error
+	// Update updates the stored Pubkey with the given contents, if the current
+	// contents of the key in storage matches the given digest. If it does not
+	// match, the update should be retried again later.
+	Update(pubkey *openpgp.Pubkey, priorMD5 string) error
 }
 
 type Notifier interface {
@@ -160,7 +162,7 @@ func UpsertKey(storage Storage, pubkey *openpgp.Pubkey) (kc KeyChange, err error
 		return nil, errgo.Mask(err)
 	}
 	if lastMD5 != lastKey.MD5 {
-		err = storage.Update(lastKey)
+		err = storage.Update(lastKey, lastMD5)
 		if err != nil {
 			return nil, errgo.Mask(err)
 		}

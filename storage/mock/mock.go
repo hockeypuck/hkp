@@ -53,7 +53,7 @@ type modifiedSinceFunc func(time.Time) ([]string, error)
 type fetchKeysFunc func([]string) ([]*openpgp.Pubkey, error)
 type fetchKeyringsFunc func([]string) ([]*storage.Keyring, error)
 type insertFunc func([]*openpgp.Pubkey) error
-type updateFunc func(*openpgp.Pubkey) error
+type updateFunc func(*openpgp.Pubkey, string) error
 
 type Storage struct {
 	Recorder
@@ -143,10 +143,10 @@ func (m *Storage) Insert(keys []*openpgp.Pubkey) error {
 	}
 	return nil
 }
-func (m *Storage) Update(key *openpgp.Pubkey) error {
+func (m *Storage) Update(key *openpgp.Pubkey, lastMD5 string) error {
 	m.record("Update", key)
 	if m.insert != nil {
-		return m.update(key)
+		return m.update(key, lastMD5)
 	}
 	return nil
 }
