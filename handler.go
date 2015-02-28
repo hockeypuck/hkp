@@ -36,6 +36,12 @@ import (
 	"gopkg.in/hockeypuck/hkp.v0/storage"
 )
 
+const (
+	shortKeyIDLen       = 8
+	longKeyIDLen        = 16
+	fingerprintKeyIDLen = 40
+)
+
 func httpError(w http.ResponseWriter, statusCode int, err error) {
 	log.Errorf("HTTP %d: %v", statusCode, err)
 	http.Error(w, http.StatusText(statusCode), statusCode)
@@ -138,7 +144,10 @@ func (h *Handler) resolve(l *Lookup) ([]string, error) {
 	}
 	if strings.HasPrefix(l.Search, "0x") {
 		keyID := openpgp.Reverse(strings.ToLower(l.Search[2:]))
-		return h.storage.Resolve([]string{keyID})
+		switch len(keyID) {
+		case shortKeyIDLen, longKeyIDLen, fingerprintKeyIDLen:
+			return h.storage.Resolve([]string{keyID})
+		}
 	}
 	return h.storage.MatchKeyword([]string{l.Search})
 }
