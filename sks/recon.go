@@ -46,15 +46,10 @@ const maxKeyRecoveryAttempts = 10
 
 type keyRecoveryCounter map[string]int
 
-type Settings struct {
-	recon.Settings
-	Path string
-}
-
 type Peer struct {
 	peer       *recon.Peer
 	storage    storage.Storage
-	settings   *Settings
+	settings   *recon.Settings
 	ptree      recon.PrefixTree
 	keyChanges chan storage.KeyChange
 
@@ -64,19 +59,23 @@ type Peer struct {
 	recoverAttempts keyRecoveryCounter
 }
 
-func newSksPTree(s *Settings) (recon.PrefixTree, error) {
-	if _, err := os.Stat(s.Path); os.IsNotExist(err) {
-		log.Debugf("creating prefix tree at: %q", s.Path)
-		err = os.MkdirAll(s.Path, 0755)
+func newSksPTree(path string, s *recon.Settings) (recon.PrefixTree, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		log.Debugf("creating prefix tree at: %q", path)
+		err = os.MkdirAll(path, 0755)
 		if err != nil {
 			return nil, errgo.Mask(err)
 		}
 	}
-	return leveldb.New(s.PTreeConfig, s.Path)
+	return leveldb.New(s.PTreeConfig, path)
 }
 
-func NewPeer(hkpStorage storage.Storage, s *Settings) (*Peer, error) {
-	ptree, err := newSksPTree(s)
+func NewPeer(st storage.Storage, path string, s *recon.Settings) (*Peer, error) {
+	if s == nil {
+		s = recon.DefaultSettings()
+	}
+
+	ptree, err := newSksPTree(path, s)
 	if err != nil {
 		return nil, errgo.Mask(err)
 	}
@@ -85,10 +84,10 @@ func NewPeer(hkpStorage storage.Storage, s *Settings) (*Peer, error) {
 		return nil, errgo.Mask(err)
 	}
 
-	peer := recon.NewPeer(&s.Settings, ptree)
+	peer := recon.NewPeer(s, ptree)
 	sksPeer := &Peer{
 		ptree:           ptree,
-		storage:         hkpStorage,
+		storage:         st,
 		settings:        s,
 		peer:            peer,
 		keyChanges:      make(chan storage.KeyChange),
