@@ -70,6 +70,7 @@ func (h *Handler) Lookup(w http.ResponseWriter, r *http.Request, _ httprouter.Pa
 		h.index(w, l)
 	default:
 		httpError(w, http.StatusNotFound, errgo.Newf("operation not found: %v", l.Op))
+		return
 	}
 }
 
@@ -154,6 +155,11 @@ func (h *Handler) get(w http.ResponseWriter, l *Lookup) {
 	keys, err := h.keys(l)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, errgo.Mask(err))
+		return
+	}
+	if len(keys) == 0 {
+		httpError(w, http.StatusNotFound, errgo.New("not found"))
+		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
@@ -167,6 +173,11 @@ func (h *Handler) index(w http.ResponseWriter, l *Lookup) {
 	keys, err := h.keys(l)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, errgo.Mask(err))
+		return
+	}
+	if len(keys) == 0 {
+		httpError(w, http.StatusNotFound, errgo.New("not found"))
+		return
 	}
 
 	if l.Options[OptionMachineReadable] {
@@ -182,6 +193,7 @@ func (h *Handler) indexJSON(w http.ResponseWriter, keys []*openpgp.Pubkey) {
 	err := enc.Encode(&keys)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, errgo.Mask(err))
+		return
 	}
 }
 
