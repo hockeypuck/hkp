@@ -43,7 +43,7 @@ const (
 )
 
 func httpError(w http.ResponseWriter, statusCode int, err error) {
-	log.Errorf("HTTP %d: %v", statusCode, err)
+	log.Errorf("HTTP %d: %v", statusCode, errgo.Details(err))
 	http.Error(w, http.StatusText(statusCode), statusCode)
 }
 
