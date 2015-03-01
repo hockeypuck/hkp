@@ -19,6 +19,7 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"gopkg.in/errgo.v1"
@@ -118,6 +119,10 @@ func (ka KeyAdded) RemoveDigests() []string {
 	return nil
 }
 
+func (ka KeyAdded) String() string {
+	return fmt.Sprintf("key %q added", ka.Digest)
+}
+
 type KeyReplaced struct {
 	OldDigest string
 	NewDigest string
@@ -131,11 +136,19 @@ func (kr KeyReplaced) RemoveDigests() []string {
 	return []string{kr.OldDigest}
 }
 
+func (kr KeyReplaced) String() string {
+	return fmt.Sprintf("key %q replaced %q", kr.NewDigest, kr.OldDigest)
+}
+
 type KeyNotChanged struct{}
 
 func (knc KeyNotChanged) InsertDigests() []string { return nil }
 
 func (knc KeyNotChanged) RemoveDigests() []string { return nil }
+
+func (knc KeyNotChanged) String() string {
+	return "key not changed"
+}
 
 func UpsertKey(storage Storage, pubkey *openpgp.Pubkey) (kc KeyChange, err error) {
 	defer func() {

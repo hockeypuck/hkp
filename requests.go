@@ -18,7 +18,9 @@
 package hkp
 
 import (
+	"bytes"
 	"encoding/hex"
+	"io/ioutil"
 	"net/http"
 	"strings"
 
@@ -152,8 +154,12 @@ func ParseHashQuery(req *http.Request) (*HashQuery, error) {
 		return nil, errgo.Newf("invalid HTTP method: %s", req.Method)
 	}
 
-	r := req.Body
-	defer r.Close()
+	defer req.Body.Close()
+	buf, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	r := bytes.NewBuffer(buf)
 
 	var hq HashQuery
 

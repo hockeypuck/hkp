@@ -93,6 +93,7 @@ func NewPeer(st storage.Storage, path string, s *recon.Settings) (*Peer, error) 
 		keyChanges:      make(chan storage.KeyChange),
 		recoverAttempts: make(keyRecoveryCounter),
 	}
+	st.Subscribe(sksPeer.updateDigests)
 	return sksPeer, nil
 }
 
@@ -354,11 +355,13 @@ func (r *Peer) requestChunk(rcvr *recon.Recover, chunk []*cf.Zp) error {
 			return errgo.Mask(err)
 		}
 	}
-	resp, err := http.Post(fmt.Sprintf("http://%s/pks/hashquery", remoteAddr),
-		"sks/hashquery", bytes.NewReader(hqBuf.Bytes()))
+
+	url := fmt.Sprintf("http://%s/pks/hashquery", remoteAddr)
+	resp, err := http.Post(url, "sks/hashquery", bytes.NewReader(hqBuf.Bytes()))
 	if err != nil {
 		return errgo.Mask(err)
 	}
+
 	// Store response in memory. Connection may timeout if we
 	// read directly from it while loading.
 	var body *bytes.Buffer
@@ -368,6 +371,10 @@ func (r *Peer) requestChunk(rcvr *recon.Recover, chunk []*cf.Zp) error {
 	}
 	body = bytes.NewBuffer(bodyBuf)
 	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return errgo.Newf("error response from %q: %v", remoteAddr, string(bodyBuf))
+	}
 
 	var nkeys, keyLen int
 	nkeys, err = recon.ReadInt(body)

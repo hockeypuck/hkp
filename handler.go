@@ -43,7 +43,9 @@ const (
 )
 
 func httpError(w http.ResponseWriter, statusCode int, err error) {
-	log.Errorf("HTTP %d: %v", statusCode, errgo.Details(err))
+	if statusCode != http.StatusNotFound {
+		log.Errorf("HTTP %d: %v", statusCode, errgo.Details(err))
+	}
 	http.Error(w, http.StatusText(statusCode), statusCode)
 }
 
