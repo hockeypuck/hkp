@@ -30,10 +30,9 @@ import (
 	"gopkg.in/errgo.v1"
 
 	"gopkg.in/hockeypuck/conflux.v2/recon"
+	"gopkg.in/hockeypuck/hkp.v0/storage"
 	log "gopkg.in/hockeypuck/logrus.v0"
 	"gopkg.in/hockeypuck/openpgp.v0"
-
-	"gopkg.in/hockeypuck/hkp.v0/storage"
 )
 
 const (
@@ -51,12 +50,46 @@ func httpError(w http.ResponseWriter, statusCode int, err error) {
 
 type Handler struct {
 	storage storage.Storage
+
+	indexWriter  IndexFormat
+	vindexWriter IndexFormat
 }
 
 type HandlerOption func(h *Handler) error
 
-func NewHandler(storage storage.Storage) *Handler {
-	return &Handler{storage: storage}
+func IndexTemplate(path string, extra ...string) HandlerOption {
+	return func(h *Handler) error {
+		tw, err := NewHTMLFormat(path, extra)
+		if err != nil {
+			return errgo.Mask(err)
+		}
+		h.indexWriter = tw
+		return nil
+	}
+}
+
+func VIndexTemplate(path string, extra ...string) HandlerOption {
+	return func(h *Handler) error {
+		tw, err := NewHTMLFormat(path, extra)
+		if err != nil {
+			return errgo.Mask(err)
+		}
+		h.vindexWriter = tw
+		return nil
+	}
+}
+
+func NewHandler(storage storage.Storage, options ...HandlerOption) (*Handler, error) {
+	h := &Handler{
+		storage: storage,
+	}
+	for _, option := range options {
+		err := option(h)
+		if err != nil {
+			return nil, errgo.Mask(err)
+		}
+	}
+	return h, nil
 }
 
 func (h *Handler) Register(r *httprouter.Router) {
@@ -74,8 +107,10 @@ func (h *Handler) Lookup(w http.ResponseWriter, r *http.Request, _ httprouter.Pa
 	switch l.Op {
 	case OperationGet, OperationHGet:
 		h.get(w, l)
-	case OperationIndex, OperationVIndex:
-		h.index(w, l)
+	case OperationIndex:
+		h.index(w, l, h.indexWriter)
+	case OperationVIndex:
+		h.index(w, l, h.vindexWriter)
 	default:
 		httpError(w, http.StatusNotFound, errgo.Newf("operation not found: %v", l.Op))
 		return
@@ -88,7 +123,7 @@ func (h *Handler) HashQuery(w http.ResponseWriter, r *http.Request, _ httprouter
 		httpError(w, http.StatusBadRequest, errgo.Mask(err))
 		return
 	}
-	var result []*openpgp.Pubkey
+	var result []*openpgp.PrimaryKey
 	for _, digest := range hq.Digests {
 		rfps, err := h.storage.MatchMD5([]string{digest})
 		if err != nil {
@@ -123,7 +158,7 @@ func (h *Handler) HashQuery(w http.ResponseWriter, r *http.Request, _ httprouter
 	}
 }
 
-func writeHashqueryKey(w http.ResponseWriter, key *openpgp.Pubkey) error {
+func writeHashqueryKey(w http.ResponseWriter, key *openpgp.PrimaryKey) error {
 	var buf bytes.Buffer
 	err := openpgp.WritePackets(&buf, key)
 	if err != nil {
@@ -154,7 +189,7 @@ func (h *Handler) resolve(l *Lookup) ([]string, error) {
 	return h.storage.MatchKeyword([]string{l.Search})
 }
 
-func (h *Handler) keys(l *Lookup) ([]*openpgp.Pubkey, error) {
+func (h *Handler) keys(l *Lookup) ([]*openpgp.PrimaryKey, error) {
 	rfps, err := h.resolve(l)
 	if err != nil {
 		return nil, err
@@ -180,7 +215,7 @@ func (h *Handler) get(w http.ResponseWriter, l *Lookup) {
 	}
 }
 
-func (h *Handler) index(w http.ResponseWriter, l *Lookup) {
+func (h *Handler) index(w http.ResponseWriter, l *Lookup, f IndexFormat) {
 	keys, err := h.keys(l)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, errgo.Mask(err))
@@ -192,13 +227,20 @@ func (h *Handler) index(w http.ResponseWriter, l *Lookup) {
 	}
 
 	if l.Options[OptionMachineReadable] {
-		h.indexMR(w, keys, l)
-	} else {
-		h.indexJSON(w, keys)
+		f = mrFormat
+	}
+	if f == nil {
+		f = jsonFormat
+	}
+
+	err = f.Write(w, l, keys)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, errgo.Mask(err))
+		return
 	}
 }
 
-func (h *Handler) indexJSON(w http.ResponseWriter, keys []*openpgp.Pubkey) {
+func (h *Handler) indexJSON(w http.ResponseWriter, keys []*openpgp.PrimaryKey) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	err := enc.Encode(&keys)
@@ -213,42 +255,6 @@ func mrTimeString(t time.Time) string {
 		return ""
 	}
 	return fmt.Sprintf("%d", t.Unix())
-}
-
-func (h *Handler) indexMR(w http.ResponseWriter, keys []*openpgp.Pubkey, l *Lookup) {
-	w.Header().Set("Content-Type", "text/plain")
-
-	fmt.Fprintf(w, "info:1:%d\n", len(keys))
-	for _, key := range keys {
-		selfsigs := key.SelfSigs()
-		if !selfsigs.Valid() {
-			continue
-		}
-
-		var keyID string
-		if l.Fingerprint {
-			keyID = key.Fingerprint()
-		} else {
-			keyID = key.KeyID()
-		}
-		keyID = strings.ToUpper(keyID)
-
-		expiresAt, _ := selfsigs.ExpiresAt()
-
-		fmt.Fprintf(w, "pub:%s:%d:%d:%d:%s:\n", keyID, key.Algorithm, key.BitLen,
-			key.Creation.Unix(), mrTimeString(expiresAt))
-
-		for _, uid := range key.UserIDs {
-			selfsigs := uid.SelfSigs(key)
-			validSince, ok := selfsigs.ValidSince()
-			if !ok {
-				continue
-			}
-			expiresAt, _ := selfsigs.ExpiresAt()
-			fmt.Fprintf(w, "uid:%s:%d:%s:\n", strings.Replace(uid.Keywords, ":", "%3a", -1),
-				validSince.Unix(), mrTimeString(expiresAt))
-		}
-	}
 }
 
 type AddResponse struct {
@@ -277,18 +283,18 @@ func (h *Handler) Add(w http.ResponseWriter, r *http.Request, _ httprouter.Param
 			httpError(w, http.StatusBadRequest, errgo.Mask(err))
 			return
 		}
-		err := openpgp.DropDuplicates(readKey.Pubkey)
+		err := openpgp.DropDuplicates(readKey.PrimaryKey)
 		if err != nil {
 			httpError(w, http.StatusInternalServerError, errgo.Mask(err))
 			return
 		}
-		change, err := storage.UpsertKey(h.storage, readKey.Pubkey)
+		change, err := storage.UpsertKey(h.storage, readKey.PrimaryKey)
 		if err != nil {
 			httpError(w, http.StatusInternalServerError, errgo.Mask(err))
 			return
 		}
 
-		fp := readKey.Pubkey.QualifiedFingerprint()
+		fp := readKey.PrimaryKey.QualifiedFingerprint()
 		switch change.(type) {
 		case storage.KeyAdded:
 			result.Inserted = append(result.Inserted, fp)

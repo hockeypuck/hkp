@@ -50,10 +50,10 @@ func (m *Recorder) MethodCount(name string) int {
 
 type resolverFunc func([]string) ([]string, error)
 type modifiedSinceFunc func(time.Time) ([]string, error)
-type fetchKeysFunc func([]string) ([]*openpgp.Pubkey, error)
+type fetchKeysFunc func([]string) ([]*openpgp.PrimaryKey, error)
 type fetchKeyringsFunc func([]string) ([]*storage.Keyring, error)
-type insertFunc func([]*openpgp.Pubkey) error
-type updateFunc func(*openpgp.Pubkey, string) error
+type insertFunc func([]*openpgp.PrimaryKey) error
+type updateFunc func(*openpgp.PrimaryKey, string) error
 
 type Storage struct {
 	Recorder
@@ -122,7 +122,7 @@ func (m *Storage) ModifiedSince(t time.Time) ([]string, error) {
 	}
 	return nil, nil
 }
-func (m *Storage) FetchKeys(s []string) ([]*openpgp.Pubkey, error) {
+func (m *Storage) FetchKeys(s []string) ([]*openpgp.PrimaryKey, error) {
 	m.record("FetchKeys", s)
 	if m.fetchKeys != nil {
 		return m.fetchKeys(s)
@@ -136,14 +136,14 @@ func (m *Storage) FetchKeyrings(s []string) ([]*storage.Keyring, error) {
 	}
 	return nil, nil
 }
-func (m *Storage) Insert(keys []*openpgp.Pubkey) error {
+func (m *Storage) Insert(keys []*openpgp.PrimaryKey) error {
 	m.record("Insert", keys)
 	if m.insert != nil {
 		return m.insert(keys)
 	}
 	return nil
 }
-func (m *Storage) Update(key *openpgp.Pubkey, lastMD5 string) error {
+func (m *Storage) Update(key *openpgp.PrimaryKey, lastMD5 string) error {
 	m.record("Update", key)
 	if m.insert != nil {
 		return m.update(key, lastMD5)

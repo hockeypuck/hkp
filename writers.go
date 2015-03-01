@@ -1,0 +1,117 @@
+/*
+   Hockeypuck - OpenPGP key server
+   Copyright (C) 2012-2014  Casey Marshall
+
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU Affero General Public License as published by
+   the Free Software Foundation, version 3.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU Affero General Public License for more details.
+
+   You should have received a copy of the GNU Affero General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+package hkp
+
+import (
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"net/http"
+	"strings"
+
+	"gopkg.in/errgo.v1"
+	"gopkg.in/hockeypuck/hkp.v0/jsonhkp"
+	"gopkg.in/hockeypuck/openpgp.v0"
+)
+
+type IndexFormat interface {
+	Write(w http.ResponseWriter, l *Lookup, keys []*openpgp.PrimaryKey) error
+}
+
+type JSONFormat struct{}
+
+var jsonFormat = &JSONFormat{}
+
+func (*JSONFormat) Write(w http.ResponseWriter, _ *Lookup, keys []*openpgp.PrimaryKey) error {
+	w.Header().Set("Content-Type", "application/json")
+	wireKeys := jsonhkp.NewPrimaryKeys(keys)
+	out, err := json.MarshalIndent(wireKeys, "", "\t")
+	if err != nil {
+		return errgo.Mask(err)
+	}
+	_, err = w.Write(out)
+	return err
+}
+
+type MRFormat struct{}
+
+var mrFormat = &MRFormat{}
+
+func (*MRFormat) Write(w http.ResponseWriter, l *Lookup, keys []*openpgp.PrimaryKey) error {
+	w.Header().Set("Content-Type", "text/plain")
+
+	fmt.Fprintf(w, "info:1:%d\n", len(keys))
+	for _, key := range keys {
+		selfsigs := key.SelfSigs()
+		if !selfsigs.Valid() {
+			continue
+		}
+
+		var keyID string
+		if l.Fingerprint {
+			keyID = key.Fingerprint()
+		} else {
+			keyID = key.KeyID()
+		}
+		keyID = strings.ToUpper(keyID)
+
+		expiresAt, _ := selfsigs.ExpiresAt()
+
+		fmt.Fprintf(w, "pub:%s:%d:%d:%d:%s:\n", keyID, key.Algorithm, key.BitLen,
+			key.Creation.Unix(), mrTimeString(expiresAt))
+
+		for _, uid := range key.UserIDs {
+			selfsigs := uid.SelfSigs(key)
+			validSince, ok := selfsigs.ValidSince()
+			if !ok {
+				continue
+			}
+			expiresAt, _ := selfsigs.ExpiresAt()
+			fmt.Fprintf(w, "uid:%s:%d:%s:\n", strings.Replace(uid.Keywords, ":", "%3a", -1),
+				validSince.Unix(), mrTimeString(expiresAt))
+		}
+	}
+	return nil
+}
+
+type HTMLFormat struct {
+	t *template.Template
+}
+
+func NewHTMLFormat(path string, extra []string) (*HTMLFormat, error) {
+	f := &HTMLFormat{}
+	var err error
+	if len(extra) > 0 {
+		f.t, err = template.ParseFiles(append([]string{path}, extra...)...)
+	} else {
+		f.t, err = template.ParseGlob(path)
+	}
+	if err != nil {
+		return nil, errgo.Mask(err)
+	}
+	return f, nil
+}
+
+func (f *HTMLFormat) Write(w http.ResponseWriter, l *Lookup, keys []*openpgp.PrimaryKey) error {
+	w.Header().Set("Content-Type", "text/html")
+	wireKeys := jsonhkp.NewPrimaryKeys(keys)
+	return errgo.Mask(f.t.Execute(w, struct {
+		Keys  []*jsonhkp.PrimaryKey
+		Query *Lookup
+	}{wireKeys, l}))
+}

@@ -409,11 +409,11 @@ func (r *Peer) upsertKeys(buf []byte) error {
 		if readKey.Error != nil {
 			return errgo.Mask(readKey.Error)
 		}
-		err := openpgp.CollectDuplicates(readKey.Pubkey)
+		err := openpgp.CollectDuplicates(readKey.PrimaryKey)
 		if err != nil {
 			return errgo.Mask(err)
 		}
-		change, err := storage.UpsertKey(r.storage, readKey.Pubkey)
+		change, err := storage.UpsertKey(r.storage, readKey.PrimaryKey)
 		if err != nil {
 			return errgo.Mask(err)
 		}

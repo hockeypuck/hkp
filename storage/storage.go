@@ -34,7 +34,7 @@ func IsNotFound(err error) bool {
 }
 
 type Keyring struct {
-	*openpgp.Pubkey
+	*openpgp.PrimaryKey
 
 	CTime time.Time
 	MTime time.Time
@@ -70,7 +70,7 @@ type Queryer interface {
 	ModifiedSince(time.Time) ([]string, error)
 
 	// FetchKeys returns the public key material matching the given RFingerprint slice.
-	FetchKeys([]string) ([]*openpgp.Pubkey, error)
+	FetchKeys([]string) ([]*openpgp.PrimaryKey, error)
 
 	// FetchKeyrings returns the keyring records matching the given RFingerprint slice.
 	FetchKeyrings([]string) ([]*Keyring, error)
@@ -81,17 +81,17 @@ type Inserter interface {
 
 	// Insert inserts new public keys if they are not already stored. If they
 	// are, then nothing is changed.
-	Insert([]*openpgp.Pubkey) error
+	Insert([]*openpgp.PrimaryKey) error
 }
 
 // Updater defines the storage API for writing key material.
 type Updater interface {
 	Inserter
 
-	// Update updates the stored Pubkey with the given contents, if the current
+	// Update updates the stored PrimaryKey with the given contents, if the current
 	// contents of the key in storage matches the given digest. If it does not
 	// match, the update should be retried again later.
-	Update(pubkey *openpgp.Pubkey, priorMD5 string) error
+	Update(pubkey *openpgp.PrimaryKey, priorMD5 string) error
 }
 
 type Notifier interface {
@@ -150,7 +150,7 @@ func (knc KeyNotChanged) String() string {
 	return "key not changed"
 }
 
-func UpsertKey(storage Storage, pubkey *openpgp.Pubkey) (kc KeyChange, err error) {
+func UpsertKey(storage Storage, pubkey *openpgp.PrimaryKey) (kc KeyChange, err error) {
 	defer func() {
 		if err == nil {
 			err = storage.Notify(kc)
@@ -159,7 +159,7 @@ func UpsertKey(storage Storage, pubkey *openpgp.Pubkey) (kc KeyChange, err error
 
 	lastKeys, err := storage.FetchKeys([]string{pubkey.RFingerprint})
 	if len(lastKeys) == 0 || IsNotFound(err) {
-		err = storage.Insert([]*openpgp.Pubkey{pubkey})
+		err = storage.Insert([]*openpgp.PrimaryKey{pubkey})
 		if err != nil {
 			return nil, errgo.Mask(err)
 		}

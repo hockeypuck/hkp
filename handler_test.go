@@ -50,13 +50,14 @@ func (s *HandlerSuite) SetUpTest(c *gc.C) {
 		mock.Resolve(func([]string) ([]string, error) {
 			return []string{"accd0e320f1cb163a2aa9305257f384b1fc8ef01"}, nil
 		}),
-		mock.FetchKeys(func([]string) ([]*openpgp.Pubkey, error) {
+		mock.FetchKeys(func([]string) ([]*openpgp.PrimaryKey, error) {
 			return openpgp.MustReadArmorKeys(testing.MustInput("alice_signed.asc")).MustParse(), nil
 		}),
 	)
 
 	r := httprouter.New()
-	handler := NewHandler(s.storage)
+	handler, err := NewHandler(s.storage)
+	c.Assert(err, gc.IsNil)
 	handler.Register(r)
 	s.srv = httptest.NewServer(r)
 }
@@ -126,7 +127,7 @@ func (s *HandlerSuite) TestIndexAlice(c *gc.C) {
 		c.Assert(err, gc.IsNil)
 
 		c.Assert(result, gc.HasLen, 1)
-		c.Assert(fmt.Sprintf("%v", result[0]["BitLen"]), gc.Equals, "2048")
+		c.Assert(fmt.Sprintf("%v", result[0]["bitLength"]), gc.Equals, "2048")
 	}
 
 	c.Assert(s.storage.MethodCount("MatchMD5"), gc.Equals, 0)

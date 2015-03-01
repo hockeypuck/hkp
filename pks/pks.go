@@ -133,8 +133,8 @@ func (sender *Sender) SendKeys(status Status) error {
 	}
 	for _, key := range keys {
 		// Send key email
-		log.Debugf("sending key %q to PKS %s", key.Pubkey.Fingerprint(), status.Addr)
-		err = sender.SendKey(status.Addr, key.Pubkey)
+		log.Debugf("sending key %q to PKS %s", key.PrimaryKey.Fingerprint(), status.Addr)
+		err = sender.SendKey(status.Addr, key.PrimaryKey)
 		if err != nil {
 			log.Errorf("error sending key to PKS %s: %v", status.Addr, err)
 			return errgo.Mask(err)
@@ -150,10 +150,10 @@ func (sender *Sender) SendKeys(status Status) error {
 }
 
 // Email an updated public key to a PKS server.
-func (sender *Sender) SendKey(addr string, key *openpgp.Pubkey) error {
+func (sender *Sender) SendKey(addr string, key *openpgp.PrimaryKey) error {
 	var msg bytes.Buffer
 	msg.WriteString("Subject: ADD\n\n")
-	openpgp.WriteArmoredPackets(&msg, []*openpgp.Pubkey{key})
+	openpgp.WriteArmoredPackets(&msg, []*openpgp.PrimaryKey{key})
 	return smtp.SendMail(sender.config.SMTP.Host, sender.smtpAuth,
 		sender.config.From, []string{addr}, msg.Bytes())
 }
