@@ -55,6 +55,7 @@ type Option string
 
 const (
 	OptionMachineReadable = Option("mr")
+	OptionJSON            = Option("json")
 	OptionNotModifiable   = Option("nm")
 )
 

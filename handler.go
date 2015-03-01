@@ -228,8 +228,7 @@ func (h *Handler) index(w http.ResponseWriter, l *Lookup, f IndexFormat) {
 
 	if l.Options[OptionMachineReadable] {
 		f = mrFormat
-	}
-	if f == nil {
+	} else if l.Options[OptionJSON] || f == nil {
 		f = jsonFormat
 	}
 
