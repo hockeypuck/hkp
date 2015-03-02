@@ -151,12 +151,6 @@ func (knc KeyNotChanged) String() string {
 }
 
 func UpsertKey(storage Storage, pubkey *openpgp.PrimaryKey) (kc KeyChange, err error) {
-	defer func() {
-		if err == nil {
-			err = storage.Notify(kc)
-		}
-	}()
-
 	lastKeys, err := storage.FetchKeys([]string{pubkey.RFingerprint})
 	if len(lastKeys) == 0 || IsNotFound(err) {
 		err = storage.Insert([]*openpgp.PrimaryKey{pubkey})

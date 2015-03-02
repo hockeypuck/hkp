@@ -34,10 +34,9 @@ import (
 	cf "gopkg.in/hockeypuck/conflux.v2"
 	"gopkg.in/hockeypuck/conflux.v2/recon"
 	"gopkg.in/hockeypuck/conflux.v2/recon/leveldb"
+	"gopkg.in/hockeypuck/hkp.v0/storage"
 	log "gopkg.in/hockeypuck/logrus.v0"
 	"gopkg.in/hockeypuck/openpgp.v0"
-
-	"gopkg.in/hockeypuck/hkp.v0/storage"
 )
 
 const requestChunkSize = 100
@@ -47,11 +46,10 @@ const maxKeyRecoveryAttempts = 10
 type keyRecoveryCounter map[string]int
 
 type Peer struct {
-	peer       *recon.Peer
-	storage    storage.Storage
-	settings   *recon.Settings
-	ptree      recon.PrefixTree
-	keyChanges chan storage.KeyChange
+	peer     *recon.Peer
+	storage  storage.Storage
+	settings *recon.Settings
+	ptree    recon.PrefixTree
 
 	t tomb.Tomb
 
@@ -90,7 +88,6 @@ func NewPeer(st storage.Storage, path string, s *recon.Settings) (*Peer, error) 
 		storage:         st,
 		settings:        s,
 		peer:            peer,
-		keyChanges:      make(chan storage.KeyChange),
 		recoverAttempts: make(keyRecoveryCounter),
 	}
 	st.Subscribe(sksPeer.updateDigests)
@@ -99,7 +96,6 @@ func NewPeer(st storage.Storage, path string, s *recon.Settings) (*Peer, error) 
 
 func (r *Peer) Start() {
 	r.t.Go(r.handleRecovery)
-	r.t.Go(r.handleKeyChanges)
 	r.peer.Start()
 }
 
@@ -132,26 +128,6 @@ func DigestZp(digest string) (*cf.Zp, error) {
 	}
 	buf = recon.PadSksElement(buf)
 	return cf.Zb(cf.P_SKS, buf), nil
-}
-
-func (r *Peer) notifyKeyChange(change storage.KeyChange) {
-	if r != nil {
-		r.keyChanges <- change
-	}
-}
-
-func (r *Peer) handleKeyChanges() error {
-	for {
-		select {
-		case <-r.t.Dying():
-			return nil
-		case keyChange := <-r.keyChanges:
-			err := r.updateDigests(keyChange)
-			if err != nil {
-				return err
-			}
-		}
-	}
 }
 
 func (r *Peer) clearRecoverAttempts(z *cf.Zp) {
@@ -413,11 +389,10 @@ func (r *Peer) upsertKeys(buf []byte) error {
 		if err != nil {
 			return errgo.Mask(err)
 		}
-		change, err := storage.UpsertKey(r.storage, readKey.PrimaryKey)
+		_, err = storage.UpsertKey(r.storage, readKey.PrimaryKey)
 		if err != nil {
 			return errgo.Mask(err)
 		}
-		r.keyChanges <- change
 	}
 	return nil
 }
