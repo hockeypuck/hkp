@@ -142,28 +142,15 @@ func (r *Peer) updateDigests(change storage.KeyChange) error {
 		if err != nil {
 			return errgo.Notef(err, "bad digest %q", digest)
 		}
-		log.Debugf("insert into prefix tree: %q", digest)
-		r.peer.InsertWith(func(err error) {
-			if err != nil {
-				log.Errorf("insert %q failed: %v", digest, err)
-			}
-			r.clearRecoverAttempts(digestZp)
-		}, digestZp)
+		r.peer.Insert(digestZp)
 	}
-
 	for _, digest := range change.RemoveDigests() {
 		digestZp, err := DigestZp(digest)
 		if err != nil {
 			return errgo.Notef(err, "bad digest %q", digest)
 		}
-		log.Debugf("remove from prefix tree: %q", digest)
-		r.peer.RemoveWith(func(err error) {
-			if err != nil {
-				log.Errorf("remove %q failed: %v", digest, err)
-			}
-		}, digestZp)
+		r.peer.Remove(digestZp)
 	}
-
 	return nil
 }
 
@@ -221,7 +208,6 @@ func (r *Peer) handleRemoteRecovery(rcvr *recon.Recover, rcvrChan chan *recon.Re
 			// Aggregate recovered IDs
 			recovered.AddSlice(rcvr.RemoteElements)
 			log.Debugf("recovery from %q: %d keys pending", rcvr.RemoteAddr.String(), recovered.Len())
-			r.peer.Disable()
 		case _, ok := <-ready:
 			// Recovery worker is ready for more
 			if !ok {
@@ -243,7 +229,6 @@ func (r *Peer) workRecovered(rcvr *recon.Recover, ready workRecoveredReady, work
 			return
 		case recovered, ok := <-work:
 			go func() {
-				defer r.peer.Enable()
 				if !ok {
 					return
 				}
@@ -296,11 +281,7 @@ func (r *Peer) countChunk(chunk []*cf.Zp) {
 		n := r.incrementRecoverAttempts(z)
 		if n > maxKeyRecoveryAttempts {
 			log.Warnf("giving up on key %q after failing to recover %d attempts", z, n)
-			r.peer.InsertWith(func(err error) {
-				if err != nil {
-					log.Errorf("failed to insert %s into prefix tree to prevent further attempts", z)
-				}
-			}, z)
+			r.peer.Insert(z)
 		}
 	}
 }
