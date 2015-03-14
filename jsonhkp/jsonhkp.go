@@ -4,7 +4,10 @@
 package jsonhkp
 
 import (
+	"io"
 	"time"
+
+	"gopkg.in/errgo.v1"
 
 	"gopkg.in/hockeypuck/openpgp.v0"
 )
@@ -102,6 +105,17 @@ func NewPrimaryKey(from *openpgp.PrimaryKey) *PrimaryKey {
 		to.UserAttrs = append(to.UserAttrs, NewUserAttribute(fromUat))
 	}
 	return to
+}
+
+func (pk *PrimaryKey) Serialize(w io.Writer) error {
+	packets := pk.packets()
+	for _, packet := range packets {
+		_, err := w.Write(packet.Data)
+		if err != nil {
+			return errgo.Mask(err)
+		}
+	}
+	return nil
 }
 
 type SubKey struct {
@@ -206,4 +220,64 @@ func NewSignature(from *openpgp.Signature) *Signature {
 	}
 
 	return to
+}
+
+func (pk *PrimaryKey) Bytes() []byte {
+	var buf []byte
+	for _, pkt := range pk.packets() {
+		buf = append(buf, pkt.Data...)
+	}
+	return buf
+}
+
+func (s *Signature) packets() []*Packet {
+	packets := []*Packet{s.Packet}
+	return packets
+}
+
+func (pk *publicKey) packets() []*Packet {
+	packets := []*Packet{pk.Packet}
+	for _, s := range pk.Signatures {
+		packets = append(packets, s.packets()...)
+	}
+	for _, un := range pk.Unsupported {
+		packets = append(packets, un)
+	}
+	return packets
+}
+
+func (u *UserID) packets() []*Packet {
+	packets := []*Packet{u.Packet}
+	for _, s := range u.Signatures {
+		packets = append(packets, s.packets()...)
+	}
+	for _, un := range u.Unsupported {
+		packets = append(packets, un)
+	}
+	return packets
+}
+
+func (u *UserAttribute) packets() []*Packet {
+	packets := []*Packet{u.Packet}
+	for _, s := range u.Signatures {
+		packets = append(packets, s.packets()...)
+	}
+	for _, un := range u.Unsupported {
+		packets = append(packets, un)
+	}
+	return packets
+}
+
+func (pk *PrimaryKey) packets() []*Packet {
+	packets := pk.publicKey.packets()
+	for _, u := range pk.UserIDs {
+		packets = append(packets, u.packets()...)
+	}
+	for _, u := range pk.UserAttrs {
+		packets = append(packets, u.packets()...)
+	}
+	for _, s := range pk.SubKeys {
+		packets = append(packets, s.packets()...)
+	}
+	return packets
 }
