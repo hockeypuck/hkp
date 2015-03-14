@@ -25,8 +25,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"sync"
-	"time"
 
 	"gopkg.in/errgo.v1"
 	"gopkg.in/tomb.v2"
@@ -52,9 +50,6 @@ type Peer struct {
 	ptree    recon.PrefixTree
 
 	t tomb.Tomb
-
-	mu              sync.Mutex
-	recoverAttempts keyRecoveryCounter
 }
 
 func newSksPTree(path string, s *recon.Settings) (recon.PrefixTree, error) {
@@ -84,11 +79,10 @@ func NewPeer(st storage.Storage, path string, s *recon.Settings) (*Peer, error) 
 
 	peer := recon.NewPeer(s, ptree)
 	sksPeer := &Peer{
-		ptree:           ptree,
-		storage:         st,
-		settings:        s,
-		peer:            peer,
-		recoverAttempts: make(keyRecoveryCounter),
+		ptree:    ptree,
+		storage:  st,
+		settings: s,
+		peer:     peer,
 	}
 	st.Subscribe(sksPeer.updateDigests)
 	return sksPeer, nil
@@ -130,12 +124,6 @@ func DigestZp(digest string) (*cf.Zp, error) {
 	return cf.Zb(cf.P_SKS, buf), nil
 }
 
-func (r *Peer) clearRecoverAttempts(z *cf.Zp) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.recoverAttempts, z.String())
-}
-
 func (r *Peer) updateDigests(change storage.KeyChange) error {
 	for _, digest := range change.InsertDigests() {
 		digestZp, err := DigestZp(digest)
@@ -155,98 +143,18 @@ func (r *Peer) updateDigests(change storage.KeyChange) error {
 }
 
 func (r *Peer) handleRecovery() error {
-	rcvrChans := make(map[string]chan *recon.Recover)
-	defer func() {
-		for _, ch := range rcvrChans {
-			close(ch)
-		}
-	}()
 	for {
 		select {
 		case <-r.t.Dying():
 			return nil
-		case rcvr, ok := <-r.peer.RecoverChan:
-			if !ok {
-				return nil
-			}
-
-			// Use remote HKP host:port as peer-unique identifier
-			remoteAddr, err := rcvr.HkpAddr()
-			if err != nil {
-				continue
-			}
-
-			// Mux recoveries to per-address channels
-			rcvrChan, has := rcvrChans[remoteAddr]
-			if !has {
-				rcvrChan = make(chan *recon.Recover)
-				rcvrChans[remoteAddr] = rcvrChan
-				go r.handleRemoteRecovery(rcvr, rcvrChan)
-			}
-			rcvrChan <- rcvr
+		case rcvr := <-r.peer.RecoverChan:
+			r.requestRecovered(rcvr)
 		}
 	}
 }
 
-type workRecoveredReady chan interface{}
-type workRecoveredWork chan *cf.ZSet
-
-func (r *Peer) handleRemoteRecovery(rcvr *recon.Recover, rcvrChan chan *recon.Recover) {
-	recovered := cf.NewZSet()
-	ready := make(workRecoveredReady)
-	work := make(workRecoveredWork)
-	defer close(work)
-	go r.workRecovered(rcvr, ready, work)
-	for {
-		select {
-		case <-r.t.Dying():
-			return
-		case rcvr, ok := <-rcvrChan:
-			if !ok {
-				return
-			}
-			// Aggregate recovered IDs
-			recovered.AddSlice(rcvr.RemoteElements)
-			log.Debugf("recovery from %q: %d keys pending", rcvr.RemoteAddr.String(), recovered.Len())
-		case _, ok := <-ready:
-			// Recovery worker is ready for more
-			if !ok {
-				return
-			}
-			work <- recovered
-			recovered = cf.NewZSet()
-		}
-	}
-}
-
-func (r *Peer) workRecovered(rcvr *recon.Recover, ready workRecoveredReady, work workRecoveredWork) {
-	defer close(ready)
-	timer := time.NewTimer(time.Duration(3) * time.Second)
-	defer timer.Stop()
-	for {
-		select {
-		case <-r.t.Dying():
-			return
-		case recovered, ok := <-work:
-			go func() {
-				if !ok {
-					return
-				}
-				err := r.requestRecovered(rcvr, recovered)
-				if err != nil {
-					log.Warn(err)
-				}
-				timer.Reset(time.Duration(r.settings.GossipIntervalSecs) * time.Second)
-			}()
-		case <-timer.C:
-			timer.Stop()
-			ready <- new(interface{})
-		}
-	}
-}
-
-func (r *Peer) requestRecovered(rcvr *recon.Recover, elements *cf.ZSet) error {
-	items := elements.Items()
+func (r *Peer) requestRecovered(rcvr *recon.Recover) error {
+	items := rcvr.RemoteElements
 	var resultErr error
 	for len(items) > 0 {
 		// Chunk requests to keep the hashquery message size and peer load reasonable.
@@ -256,7 +164,7 @@ func (r *Peer) requestRecovered(rcvr *recon.Recover, elements *cf.ZSet) error {
 		}
 		chunk := items[:chunksize]
 		items = items[chunksize:]
-		r.countChunk(chunk)
+
 		err := r.requestChunk(rcvr, chunk)
 		if err != nil {
 			if resultErr == nil {
@@ -267,23 +175,6 @@ func (r *Peer) requestRecovered(rcvr *recon.Recover, elements *cf.ZSet) error {
 		}
 	}
 	return resultErr
-}
-
-func (r *Peer) incrementRecoverAttempts(z *cf.Zp) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.recoverAttempts[z.String()]++
-	return r.recoverAttempts[z.String()]
-}
-
-func (r *Peer) countChunk(chunk []*cf.Zp) {
-	for _, z := range chunk {
-		n := r.incrementRecoverAttempts(z)
-		if n > maxKeyRecoveryAttempts {
-			log.Warnf("giving up on key %q after failing to recover %d attempts", z, n)
-			r.peer.Insert(z)
-		}
-	}
 }
 
 func (r *Peer) requestChunk(rcvr *recon.Recover, chunk []*cf.Zp) error {
@@ -366,7 +257,8 @@ func (r *Peer) upsertKeys(buf []byte) error {
 		if readKey.Error != nil {
 			return errgo.Mask(readKey.Error)
 		}
-		err := openpgp.CollectDuplicates(readKey.PrimaryKey)
+		// TODO: collect duplicates to replicate SKS hashes?
+		err := openpgp.DropDuplicates(readKey.PrimaryKey)
 		if err != nil {
 			return errgo.Mask(err)
 		}
