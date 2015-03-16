@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/errgo.v1"
@@ -94,12 +96,18 @@ type HTMLFormat struct {
 }
 
 func NewHTMLFormat(path string, extra []string) (*HTMLFormat, error) {
-	f := &HTMLFormat{}
+	f := &HTMLFormat{
+		t: template.New(filepath.Base(path)).Funcs(template.FuncMap{
+			"url": func(u *url.URL) template.URL {
+				return template.URL(u.String())
+			},
+		}),
+	}
 	var err error
 	if len(extra) > 0 {
-		f.t, err = template.ParseFiles(append([]string{path}, extra...)...)
+		f.t, err = f.t.ParseFiles(append([]string{path}, extra...)...)
 	} else {
-		f.t, err = template.ParseGlob(path)
+		f.t, err = f.t.ParseGlob(path)
 	}
 	if err != nil {
 		return nil, errgo.Mask(err)

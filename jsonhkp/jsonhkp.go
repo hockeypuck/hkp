@@ -4,7 +4,10 @@
 package jsonhkp
 
 import (
+	"encoding/base64"
+	"fmt"
 	"io"
+	"net/url"
 	"time"
 
 	"gopkg.in/errgo.v1"
@@ -182,6 +185,11 @@ func NewPhoto(image []byte) *Photo {
 		MIMEType: "image/jpeg", // The only image format currently supported, AFAIK
 		Contents: image,
 	}
+}
+
+func (p *Photo) DataURI() (*url.URL, error) {
+	return url.Parse(fmt.Sprintf(
+		"data:%s;base64,%s", p.MIMEType, base64.StdEncoding.EncodeToString(p.Contents)))
 }
 
 type Signature struct {
