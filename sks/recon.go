@@ -20,11 +20,15 @@ package sks
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sync"
+	"time"
 
 	"gopkg.in/errgo.v1"
 	"gopkg.in/tomb.v2"
@@ -49,7 +53,100 @@ type Peer struct {
 	settings *recon.Settings
 	ptree    recon.PrefixTree
 
+	path  string
+	stats *Stats
+
 	t tomb.Tomb
+}
+
+type LoadStat struct {
+	Inserted int
+	Updated  int
+}
+
+type LoadStatMap map[time.Time]*LoadStat
+
+func (m LoadStatMap) MarshalJSON() ([]byte, error) {
+	doc := map[string]*LoadStat{}
+	for k, v := range m {
+		doc[k.Format(time.RFC3339)] = v
+	}
+	return json.Marshal(&doc)
+}
+
+func (m LoadStatMap) UnmarshalJSON(b []byte) error {
+	doc := map[string]*LoadStat{}
+	err := json.Unmarshal(b, &doc)
+	if err != nil {
+		return err
+	}
+	for k, v := range doc {
+		t, err := time.Parse(time.RFC3339, k)
+		if err != nil {
+			return err
+		}
+		m[t] = v
+	}
+	return nil
+}
+
+func (m LoadStatMap) update(t time.Time, kc storage.KeyChange) {
+	ls, ok := m[t]
+	if !ok {
+		ls = &LoadStat{}
+		m[t] = ls
+	}
+	switch kc.(type) {
+	case storage.KeyAdded:
+		ls.Inserted++
+	case storage.KeyReplaced:
+		ls.Updated++
+	}
+}
+
+type Stats struct {
+	Total int
+
+	mu     sync.Mutex
+	Hourly LoadStatMap
+	Daily  LoadStatMap
+}
+
+func newStats() *Stats {
+	return &Stats{
+		Hourly: LoadStatMap{},
+		Daily:  LoadStatMap{},
+	}
+}
+
+func (s *Stats) prune() {
+	yesterday := time.Now().UTC().Add(-24 * time.Hour)
+	lastWeek := time.Now().UTC().Add(-24 * 7 * time.Hour)
+	s.mu.Lock()
+	for k := range s.Hourly {
+		if k.Before(yesterday) {
+			delete(s.Hourly, k)
+		}
+	}
+	for k := range s.Daily {
+		if k.Before(lastWeek) {
+			delete(s.Daily, k)
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *Stats) update(kc storage.KeyChange) {
+	s.mu.Lock()
+	s.Hourly.update(time.Now().UTC().Truncate(time.Hour), kc)
+	s.Daily.update(time.Now().UTC().Truncate(24*time.Hour), kc)
+	switch kc.(type) {
+	case storage.KeyAdded:
+		s.Total++
+	case storage.KeyReplaced:
+		s.Total++
+	}
+	s.mu.Unlock()
 }
 
 func newSksPTree(path string, s *recon.Settings) (recon.PrefixTree, error) {
@@ -83,13 +180,77 @@ func NewPeer(st storage.Storage, path string, s *recon.Settings) (*Peer, error) 
 		storage:  st,
 		settings: s,
 		peer:     peer,
+		path:     path,
 	}
+	sksPeer.loadStats()
 	st.Subscribe(sksPeer.updateDigests)
 	return sksPeer, nil
 }
 
+func statsFilename(path string) string {
+	dir, base := filepath.Dir(path), filepath.Base(path)
+	return filepath.Join(dir, "."+base+".stats")
+}
+
+func (p *Peer) loadStats() {
+	fn := statsFilename(p.path)
+	stats := newStats()
+
+	f, err := os.Open(fn)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warningf("cannot open stats %q: %v", fn, err)
+		}
+	} else {
+		defer f.Close()
+		err = json.NewDecoder(f).Decode(&stats)
+		if err != nil {
+			log.Warningf("cannot decode stats %q: %v", fn, err)
+		}
+	}
+
+	root, err := p.ptree.Root()
+	if err != nil {
+		log.Warningf("error accessing prefix tree root: %v", err)
+	} else {
+		stats.Total = root.Size()
+	}
+
+	p.stats = stats
+}
+
+func (p *Peer) saveStats() {
+	fn := statsFilename(p.path)
+
+	f, err := os.Create(fn)
+	if err != nil {
+		log.Warningf("cannot open stats %q: %v", fn, err)
+	}
+	defer f.Close()
+	err = json.NewEncoder(f).Encode(p.stats)
+	if err != nil {
+		log.Warningf("cannot encode stats %q: %v", fn, err)
+	}
+
+	log.Error(p.stats)
+}
+
+func (p *Peer) pruneStats() error {
+	timer := time.NewTimer(time.Hour)
+	for {
+		select {
+		case <-p.t.Dying():
+			return nil
+		case <-timer.C:
+			p.stats.prune()
+			timer.Reset(time.Hour)
+		}
+	}
+}
+
 func (r *Peer) Start() {
 	r.t.Go(r.handleRecovery)
+	r.t.Go(r.pruneStats)
 	r.peer.Start()
 }
 
@@ -113,6 +274,8 @@ func (r *Peer) Stop() {
 	if err != nil {
 		log.Errorf("error closing prefix tree: %v", errgo.Details(err))
 	}
+
+	r.saveStats()
 }
 
 func DigestZp(digest string) (*cf.Zp, error) {
@@ -125,6 +288,7 @@ func DigestZp(digest string) (*cf.Zp, error) {
 }
 
 func (r *Peer) updateDigests(change storage.KeyChange) error {
+	r.stats.update(change)
 	for _, digest := range change.InsertDigests() {
 		digestZp, err := DigestZp(digest)
 		if err != nil {
