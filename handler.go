@@ -21,7 +21,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,6 +33,7 @@ import (
 	"gopkg.in/errgo.v1"
 
 	"gopkg.in/hockeypuck/conflux.v2/recon"
+	"gopkg.in/hockeypuck/hkp.v0/sks"
 	"gopkg.in/hockeypuck/hkp.v0/storage"
 	log "gopkg.in/hockeypuck/logrus.v0"
 	"gopkg.in/hockeypuck/openpgp.v0"
@@ -53,6 +57,9 @@ type Handler struct {
 
 	indexWriter  IndexFormat
 	vindexWriter IndexFormat
+
+	statsTemplate *template.Template
+	statsFunc     func() (interface{}, error)
 }
 
 type HandlerOption func(h *Handler) error
@@ -75,6 +82,34 @@ func VIndexTemplate(path string, extra ...string) HandlerOption {
 			return errgo.Mask(err)
 		}
 		h.vindexWriter = tw
+		return nil
+	}
+}
+
+func StatsTemplate(path string, extra ...string) HandlerOption {
+	return func(h *Handler) error {
+		t := template.New(filepath.Base(path)).Funcs(template.FuncMap{
+			"url": func(u *url.URL) template.URL {
+				return template.URL(u.String())
+			},
+		})
+		var err error
+		if len(extra) > 0 {
+			t, err = t.ParseFiles(append([]string{path}, extra...)...)
+		} else {
+			t, err = t.ParseGlob(path)
+		}
+		if err != nil {
+			return errgo.Mask(err)
+		}
+		h.statsTemplate = t
+		return nil
+	}
+}
+
+func StatsFunc(f func() (interface{}, error)) HandlerOption {
+	return func(h *Handler) error {
+		h.statsFunc = f
 		return nil
 	}
 }
@@ -111,6 +146,8 @@ func (h *Handler) Lookup(w http.ResponseWriter, r *http.Request, _ httprouter.Pa
 		h.index(w, l, h.indexWriter)
 	case OperationVIndex:
 		h.index(w, l, h.vindexWriter)
+	case OperationStats:
+		h.stats(w, l)
 	default:
 		httpError(w, http.StatusNotFound, errgo.Newf("operation not found: %v", l.Op))
 		return
@@ -254,6 +291,33 @@ func mrTimeString(t time.Time) string {
 		return ""
 	}
 	return fmt.Sprintf("%d", t.Unix())
+}
+
+type StatsResponse struct {
+	Info  interface{}
+	Stats *sks.Stats
+}
+
+func (h *Handler) stats(w http.ResponseWriter, l *Lookup) {
+	if h.statsFunc == nil {
+		httpError(w, http.StatusBadRequest, errgo.New("stats not configured"))
+		fmt.Fprintln(w, "stats not configured")
+		return
+	}
+	data, err := h.statsFunc()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, errgo.Mask(err))
+		return
+	}
+
+	if h.statsTemplate != nil && !(l.Options[OptionJSON] || l.Options[OptionMachineReadable]) {
+		err = h.statsTemplate.Execute(w, data)
+	} else {
+		err = json.NewEncoder(w).Encode(data)
+	}
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, errgo.Mask(err))
+	}
 }
 
 type AddResponse struct {

@@ -149,6 +149,23 @@ func (s *Stats) update(kc storage.KeyChange) {
 	s.mu.Unlock()
 }
 
+func (s *Stats) clone() *Stats {
+	s.mu.Lock()
+	result := &Stats{
+		Total:  s.Total,
+		Hourly: LoadStatMap{},
+		Daily:  LoadStatMap{},
+	}
+	for k, v := range s.Hourly {
+		result.Hourly[k] = v
+	}
+	for k, v := range s.Daily {
+		result.Daily[k] = v
+	}
+	s.mu.Unlock()
+	return result
+}
+
 func newSksPTree(path string, s *recon.Settings) (recon.PrefixTree, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		log.Debugf("creating prefix tree at: %q", path)
@@ -231,8 +248,6 @@ func (p *Peer) saveStats() {
 	if err != nil {
 		log.Warningf("cannot encode stats %q: %v", fn, err)
 	}
-
-	log.Error(p.stats)
 }
 
 func (p *Peer) pruneStats() error {
@@ -246,6 +261,10 @@ func (p *Peer) pruneStats() error {
 			timer.Reset(time.Hour)
 		}
 	}
+}
+
+func (r *Peer) Stats() *Stats {
+	return r.stats.clone()
 }
 
 func (r *Peer) Start() {
