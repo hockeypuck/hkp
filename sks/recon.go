@@ -197,7 +197,7 @@ func NewPeer(st storage.Storage, path string, s *recon.Settings) (*Peer, error) 
 		peer:     peer,
 		path:     path,
 	}
-	sksPeer.loadStats()
+	sksPeer.readStats()
 	st.Subscribe(sksPeer.updateDigests)
 	return sksPeer, nil
 }
@@ -207,7 +207,7 @@ func statsFilename(path string) string {
 	return filepath.Join(dir, "."+base+".stats")
 }
 
-func (p *Peer) loadStats() {
+func (p *Peer) readStats() {
 	fn := statsFilename(p.path)
 	stats := newStats()
 
@@ -234,7 +234,7 @@ func (p *Peer) loadStats() {
 	p.stats = stats
 }
 
-func (p *Peer) saveStats() {
+func (p *Peer) WriteStats() {
 	fn := statsFilename(p.path)
 
 	f, err := os.Create(fn)
@@ -292,7 +292,7 @@ func (r *Peer) Stop() {
 		log.Errorf("error closing prefix tree: %v", errgo.Details(err))
 	}
 
-	r.saveStats()
+	r.WriteStats()
 }
 
 func DigestZp(digest string) (*cf.Zp, error) {
