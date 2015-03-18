@@ -99,6 +99,8 @@ func (m LoadStatMap) update(t time.Time, kc storage.KeyChange) {
 	switch kc.(type) {
 	case storage.KeyAdded:
 		ls.Inserted++
+	case storage.KeyReplaced:
+		ls.Updated++
 	}
 }
 
@@ -140,8 +142,6 @@ func (s *Stats) update(kc storage.KeyChange) {
 	s.Daily.update(time.Now().UTC().Truncate(24*time.Hour), kc)
 	switch kc.(type) {
 	case storage.KeyAdded:
-		s.Total++
-	case storage.KeyReplaced:
 		s.Total++
 	}
 	s.mu.Unlock()

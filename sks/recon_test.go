@@ -61,7 +61,7 @@ func (s *SksSuite) TestPeerStats(c *gc.C) {
 	c.Assert(s.peer.stats.Daily[thisDay].Updated, gc.Equals, 0)
 
 	s.peer.updateDigests(storage.KeyReplaced{"decafbad", "cafebabe"})
-	c.Assert(s.peer.stats.Total, gc.Equals, 2)
+	c.Assert(s.peer.stats.Total, gc.Equals, 1)
 	c.Assert(s.peer.stats.Hourly[thisHour].Inserted, gc.Equals, 1)
 	c.Assert(s.peer.stats.Hourly[thisHour].Updated, gc.Equals, 1)
 	c.Assert(s.peer.stats.Daily[thisDay].Inserted, gc.Equals, 1)
