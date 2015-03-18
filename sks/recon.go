@@ -99,8 +99,6 @@ func (m LoadStatMap) update(t time.Time, kc storage.KeyChange) {
 	switch kc.(type) {
 	case storage.KeyAdded:
 		ls.Inserted++
-	case storage.KeyReplaced:
-		ls.Updated++
 	}
 }
 
