@@ -92,6 +92,12 @@ func StatsTemplate(path string, extra ...string) HandlerOption {
 			"url": func(u *url.URL) template.URL {
 				return template.URL(u.String())
 			},
+			"day": func(t time.Time) string {
+				return t.Format("2006-01-02")
+			},
+			"hour": func(t time.Time) string {
+				return t.Format("2006-01-02 15")
+			},
 		})
 		var err error
 		if len(extra) > 0 {
