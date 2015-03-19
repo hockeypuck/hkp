@@ -287,12 +287,17 @@ func (r *Peer) Stop() {
 	}
 	log.Info("recon peer: stopped")
 
-	err = r.ptree.Close()
+	err = r.Close()
 	if err != nil {
 		log.Errorf("error closing prefix tree: %v", errgo.Details(err))
 	}
 
 	r.WriteStats()
+}
+
+func (r *Peer) Close() error {
+	r.peer.Flush()
+	return r.ptree.Close()
 }
 
 func DigestZp(digest string) (*cf.Zp, error) {

@@ -81,7 +81,7 @@ type Inserter interface {
 
 	// Insert inserts new public keys if they are not already stored. If they
 	// are, then nothing is changed.
-	Insert([]*openpgp.PrimaryKey) error
+	Insert([]*openpgp.PrimaryKey) (int, error)
 }
 
 // Updater defines the storage API for writing key material.
@@ -100,6 +100,10 @@ type Notifier interface {
 
 	// Notify invokes all registered callbacks with a key change notification.
 	Notify(change KeyChange) error
+
+	// RenotifyAll() invokes all registered callbacks with KeyAdded notifications
+	// for each key in the Storage.
+	RenotifyAll() error
 }
 
 type KeyChange interface {
@@ -150,10 +154,27 @@ func (knc KeyNotChanged) String() string {
 	return "key not changed"
 }
 
+type InsertError struct {
+	Duplicates []*openpgp.PrimaryKey
+	Errors     []error
+}
+
+func (err InsertError) Error() string {
+	return fmt.Sprintf("%d duplicates, %d errors", len(err.Duplicates), len(err.Errors))
+}
+
+func Duplicates(err error) []*openpgp.PrimaryKey {
+	insertErr, ok := err.(InsertError)
+	if !ok {
+		return nil
+	}
+	return insertErr.Duplicates
+}
+
 func UpsertKey(storage Storage, pubkey *openpgp.PrimaryKey) (kc KeyChange, err error) {
 	lastKeys, err := storage.FetchKeys([]string{pubkey.RFingerprint})
 	if len(lastKeys) == 0 || IsNotFound(err) {
-		err = storage.Insert([]*openpgp.PrimaryKey{pubkey})
+		_, err = storage.Insert([]*openpgp.PrimaryKey{pubkey})
 		if err != nil {
 			return nil, errgo.Mask(err)
 		}

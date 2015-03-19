@@ -52,8 +52,9 @@ type resolverFunc func([]string) ([]string, error)
 type modifiedSinceFunc func(time.Time) ([]string, error)
 type fetchKeysFunc func([]string) ([]*openpgp.PrimaryKey, error)
 type fetchKeyringsFunc func([]string) ([]*storage.Keyring, error)
-type insertFunc func([]*openpgp.PrimaryKey) error
+type insertFunc func([]*openpgp.PrimaryKey) (int, error)
 type updateFunc func(*openpgp.PrimaryKey, string) error
+type renotifyAllFunc func() error
 
 type Storage struct {
 	Recorder
@@ -65,6 +66,7 @@ type Storage struct {
 	fetchKeyrings fetchKeyringsFunc
 	insert        insertFunc
 	update        updateFunc
+	renotifyAll   renotifyAllFunc
 
 	notified []func(storage.KeyChange) error
 }
@@ -83,8 +85,9 @@ func FetchKeys(f fetchKeysFunc) Option { return func(m *Storage) { m.fetchKeys =
 func FetchKeyrings(f fetchKeyringsFunc) Option {
 	return func(m *Storage) { m.fetchKeyrings = f }
 }
-func Insert(f insertFunc) Option { return func(m *Storage) { m.insert = f } }
-func Update(f updateFunc) Option { return func(m *Storage) { m.update = f } }
+func Insert(f insertFunc) Option           { return func(m *Storage) { m.insert = f } }
+func Update(f updateFunc) Option           { return func(m *Storage) { m.update = f } }
+func RenotifyAll(f renotifyAllFunc) Option { return func(m *Storage) { m.renotifyAll = f } }
 
 func NewStorage(options ...Option) *Storage {
 	m := &Storage{}
@@ -136,16 +139,16 @@ func (m *Storage) FetchKeyrings(s []string) ([]*storage.Keyring, error) {
 	}
 	return nil, nil
 }
-func (m *Storage) Insert(keys []*openpgp.PrimaryKey) error {
+func (m *Storage) Insert(keys []*openpgp.PrimaryKey) (int, error) {
 	m.record("Insert", keys)
 	if m.insert != nil {
 		return m.insert(keys)
 	}
-	return nil
+	return 0, nil
 }
 func (m *Storage) Update(key *openpgp.PrimaryKey, lastMD5 string) error {
 	m.record("Update", key)
-	if m.insert != nil {
+	if m.update != nil {
 		return m.update(key, lastMD5)
 	}
 	return nil
@@ -159,6 +162,13 @@ func (m *Storage) Notify(change storage.KeyChange) error {
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+func (m *Storage) RenotifyAll() error {
+	m.record("RenotifyAll")
+	if m.renotifyAll != nil {
+		return m.renotifyAll()
 	}
 	return nil
 }
