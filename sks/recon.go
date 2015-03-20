@@ -20,14 +20,12 @@ package sks
 import (
 	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"gopkg.in/errgo.v1"
@@ -59,112 +57,7 @@ type Peer struct {
 	t tomb.Tomb
 }
 
-type LoadStat struct {
-	Inserted int
-	Updated  int
-}
-
-type LoadStatMap map[time.Time]*LoadStat
-
-func (m LoadStatMap) MarshalJSON() ([]byte, error) {
-	doc := map[string]*LoadStat{}
-	for k, v := range m {
-		doc[k.Format(time.RFC3339)] = v
-	}
-	return json.Marshal(&doc)
-}
-
-func (m LoadStatMap) UnmarshalJSON(b []byte) error {
-	doc := map[string]*LoadStat{}
-	err := json.Unmarshal(b, &doc)
-	if err != nil {
-		return err
-	}
-	for k, v := range doc {
-		t, err := time.Parse(time.RFC3339, k)
-		if err != nil {
-			return err
-		}
-		m[t] = v
-	}
-	return nil
-}
-
-func (m LoadStatMap) update(t time.Time, kc storage.KeyChange) {
-	ls, ok := m[t]
-	if !ok {
-		ls = &LoadStat{}
-		m[t] = ls
-	}
-	switch kc.(type) {
-	case storage.KeyAdded:
-		ls.Inserted++
-	case storage.KeyReplaced:
-		ls.Updated++
-	}
-}
-
-type Stats struct {
-	Total int
-
-	mu     sync.Mutex
-	Hourly LoadStatMap
-	Daily  LoadStatMap
-}
-
-func newStats() *Stats {
-	return &Stats{
-		Hourly: LoadStatMap{},
-		Daily:  LoadStatMap{},
-	}
-}
-
-func (s *Stats) prune() {
-	yesterday := time.Now().UTC().Add(-24 * time.Hour)
-	lastWeek := time.Now().UTC().Add(-24 * 7 * time.Hour)
-	s.mu.Lock()
-	for k := range s.Hourly {
-		if k.Before(yesterday) {
-			delete(s.Hourly, k)
-		}
-	}
-	for k := range s.Daily {
-		if k.Before(lastWeek) {
-			delete(s.Daily, k)
-		}
-	}
-	s.mu.Unlock()
-}
-
-func (s *Stats) update(kc storage.KeyChange) {
-	s.mu.Lock()
-	s.Hourly.update(time.Now().UTC().Truncate(time.Hour), kc)
-	s.Daily.update(time.Now().UTC().Truncate(24*time.Hour), kc)
-	switch kc.(type) {
-	case storage.KeyAdded:
-		s.Total++
-	}
-	s.mu.Unlock()
-}
-
-func (s *Stats) clone() *Stats {
-	s.mu.Lock()
-	result := &Stats{
-		Total:  s.Total,
-		Hourly: LoadStatMap{},
-		Daily:  LoadStatMap{},
-	}
-	for k, v := range s.Hourly {
-		result.Hourly[k] = v
-	}
-	for k, v := range s.Daily {
-		result.Daily[k] = v
-	}
-	s.mu.Unlock()
-	return result
-}
-
-func newSksPTree(path string, s *recon.Settings) (recon.PrefixTree, error) {
+func NewPrefixTree(path string, s *recon.Settings) (recon.PrefixTree, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		log.Debugf("creating prefix tree at: %q", path)
 		err = os.MkdirAll(path, 0755)
@@ -180,7 +73,7 @@ func NewPeer(st storage.Storage, path string, s *recon.Settings) (*Peer, error) 
 		s = recon.DefaultSettings()
 	}
 
-	ptree, err := newSksPTree(path, s)
+	ptree, err := NewPrefixTree(path, s)
 	if err != nil {
 		return nil, errgo.Mask(err)
 	}
@@ -202,26 +95,18 @@ func NewPeer(st storage.Storage, path string, s *recon.Settings) (*Peer, error) 
 	return sksPeer, nil
 }
 
-func statsFilename(path string) string {
+func StatsFilename(path string) string {
 	dir, base := filepath.Dir(path), filepath.Base(path)
 	return filepath.Join(dir, "."+base+".stats")
 }
 
 func (p *Peer) readStats() {
-	fn := statsFilename(p.path)
-	stats := newStats()
-
-	f, err := os.Open(fn)
+	fn := StatsFilename(p.path)
+	stats := NewStats()
+	err := stats.ReadFile(fn)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Warningf("cannot open stats %q: %v", fn, err)
-		}
-	} else {
-		defer f.Close()
-		err = json.NewDecoder(f).Decode(&stats)
-		if err != nil {
-			log.Warningf("cannot decode stats %q: %v", fn, err)
-		}
+		log.Warningf("cannot open stats %q: %v", fn, err)
+		stats = NewStats()
 	}
 
 	root, err := p.ptree.Root()
@@ -234,17 +119,11 @@ func (p *Peer) readStats() {
 	p.stats = stats
 }
 
-func (p *Peer) WriteStats() {
-	fn := statsFilename(p.path)
-
-	f, err := os.Create(fn)
+func (p *Peer) writeStats() {
+	fn := StatsFilename(p.path)
+	err := p.stats.WriteFile(fn)
 	if err != nil {
-		log.Warningf("cannot open stats %q: %v", fn, err)
-	}
-	defer f.Close()
-	err = json.NewEncoder(f).Encode(p.stats)
-	if err != nil {
-		log.Warningf("cannot encode stats %q: %v", fn, err)
+		log.Warningf("cannot write stats %q: %v", fn, err)
 	}
 }
 
@@ -287,17 +166,12 @@ func (r *Peer) Stop() {
 	}
 	log.Info("recon peer: stopped")
 
-	err = r.Close()
+	err = r.ptree.Close()
 	if err != nil {
 		log.Errorf("error closing prefix tree: %v", errgo.Details(err))
 	}
 
-	r.WriteStats()
-}
-
-func (r *Peer) Close() error {
-	r.peer.Flush()
-	return r.ptree.Close()
+	r.writeStats()
 }
 
 func DigestZp(digest string) (*cf.Zp, error) {
@@ -310,7 +184,7 @@ func DigestZp(digest string) (*cf.Zp, error) {
 }
 
 func (r *Peer) updateDigests(change storage.KeyChange) error {
-	r.stats.update(change)
+	r.stats.Update(change)
 	for _, digest := range change.InsertDigests() {
 		digestZp, err := DigestZp(digest)
 		if err != nil {

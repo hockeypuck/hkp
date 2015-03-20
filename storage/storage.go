@@ -20,6 +20,7 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"gopkg.in/errgo.v1"
@@ -43,6 +44,7 @@ type Keyring struct {
 // Storage defines the API that is needed to implement a complete storage
 // backend for an HKP service.
 type Storage interface {
+	io.Closer
 	Queryer
 	Updater
 	Notifier

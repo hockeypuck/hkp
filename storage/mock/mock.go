@@ -48,6 +48,7 @@ func (m *Recorder) MethodCount(name string) int {
 	return n
 }
 
+type closeFunc func() error
 type resolverFunc func([]string) ([]string, error)
 type modifiedSinceFunc func(time.Time) ([]string, error)
 type fetchKeysFunc func([]string) ([]*openpgp.PrimaryKey, error)
@@ -58,6 +59,7 @@ type renotifyAllFunc func() error
 
 type Storage struct {
 	Recorder
+	close_        closeFunc
 	matchMD5      resolverFunc
 	resolve       resolverFunc
 	matchKeyword  resolverFunc
@@ -73,6 +75,7 @@ type Storage struct {
 
 type Option func(*Storage)
 
+func Close(f closeFunc) Option       { return func(m *Storage) { m.close_ = f } }
 func MatchMD5(f resolverFunc) Option { return func(m *Storage) { m.matchMD5 = f } }
 func Resolve(f resolverFunc) Option  { return func(m *Storage) { m.resolve = f } }
 func MatchKeyword(f resolverFunc) Option {
@@ -97,6 +100,13 @@ func NewStorage(options ...Option) *Storage {
 	return m
 }
 
+func (m *Storage) Close() error {
+	m.record("Close")
+	if m.close_ != nil {
+		return m.close_()
+	}
+	return nil
+}
 func (m *Storage) MatchMD5(s []string) ([]string, error) {
 	m.record("MatchMD5", s)
 	if m.matchMD5 != nil {
