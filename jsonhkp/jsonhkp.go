@@ -29,7 +29,7 @@ import (
 
 	"gopkg.in/errgo.v1"
 
-	"gopkg.in/hockeypuck/openpgp.v0"
+	"gopkg.in/hockeypuck/openpgp.v1"
 )
 
 type Packet struct {
@@ -79,7 +79,7 @@ func newPublicKey(from *openpgp.PublicKey) *publicKey {
 	}
 
 	if !from.Creation.IsZero() {
-		// can happen if openpgp.v0 isn't able to parse this type of key
+		// can happen if openpgp.v1 isn't able to parse this type of key
 		to.Creation = from.Creation.UTC().Format(time.RFC3339)
 	}
 
@@ -242,7 +242,7 @@ func NewSignature(from *openpgp.Signature) *Signature {
 	}
 
 	if !from.Creation.IsZero() {
-		// can happen if openpgp.v0 isn't able to parse this type of signature
+		// can happen if openpgp.v1 isn't able to parse this type of signature
 		to.Creation = from.Creation.UTC().Format(time.RFC3339)
 	}
 

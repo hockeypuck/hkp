@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"gopkg.in/errgo.v1"
-	"gopkg.in/hockeypuck/hkp.v0/storage"
+	"gopkg.in/hockeypuck/hkp.v1/storage"
 )
 
 type LoadStat struct {

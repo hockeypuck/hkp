@@ -31,9 +31,9 @@ import (
 	gc "gopkg.in/check.v1"
 
 	"github.com/hockeypuck/testing"
-	"gopkg.in/hockeypuck/openpgp.v0"
+	"gopkg.in/hockeypuck/openpgp.v1"
 
-	"gopkg.in/hockeypuck/hkp.v0/storage/mock"
+	"gopkg.in/hockeypuck/hkp.v1/storage/mock"
 )
 
 func Test(t *stdtesting.T) { gc.TestingT(t) }
