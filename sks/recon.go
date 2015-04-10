@@ -304,7 +304,7 @@ func (r *Peer) requestChunk(rcvr *recon.Recover, chunk []*cf.Zp) error {
 		// Merge locally
 		err = r.upsertKeys(keyBuf.Bytes())
 		if err != nil {
-			return errgo.Mask(err)
+			log.Errorf("cannot upsert: %v", err)
 		}
 	}
 	// Read last two bytes (CRLF, why?), or SKS will complain.
