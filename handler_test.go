@@ -168,16 +168,6 @@ func (s *HandlerSuite) TestMissingSearch(c *gc.C) {
 	}
 }
 
-func (s *HandlerSuite) TestAddMismatch(c *gc.C) {
-	keytext, err := ioutil.ReadAll(testing.MustInput("uat.asc"))
-	c.Assert(err, gc.IsNil)
-	res, err := http.PostForm(s.srv.URL+"/pks/add", url.Values{
-		"keytext": []string{string(keytext)},
-	})
-	c.Assert(err, gc.IsNil)
-	c.Assert(res.StatusCode, gc.Equals, http.StatusInternalServerError)
-}
-
 func (s *HandlerSuite) TestAdd(c *gc.C) {
 	keytext, err := ioutil.ReadAll(testing.MustInput("alice_unsigned.asc"))
 	c.Assert(err, gc.IsNil)

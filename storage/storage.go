@@ -173,16 +173,32 @@ func Duplicates(err error) []*openpgp.PrimaryKey {
 	return insertErr.Duplicates
 }
 
+func firstMatch(results []*openpgp.PrimaryKey, match string) (*openpgp.PrimaryKey, error) {
+	for _, key := range results {
+		if key.RFingerprint == match {
+			return key, nil
+		}
+	}
+	return nil, ErrKeyNotFound
+}
+
 func UpsertKey(storage Storage, pubkey *openpgp.PrimaryKey) (kc KeyChange, err error) {
+	var lastKey *openpgp.PrimaryKey
 	lastKeys, err := storage.FetchKeys([]string{pubkey.RFingerprint})
-	if len(lastKeys) == 0 || IsNotFound(err) {
+	if err == nil {
+		// match primary fingerprint -- someone might have reused a subkey somewhere
+		lastKey, err = firstMatch(lastKeys, pubkey.RFingerprint)
+	}
+	if IsNotFound(err) {
 		_, err = storage.Insert([]*openpgp.PrimaryKey{pubkey})
 		if err != nil {
 			return nil, errgo.Mask(err)
 		}
 		return KeyAdded{Digest: pubkey.MD5}, nil
+	} else if err != nil {
+		return nil, errgo.Mask(err)
 	}
-	lastKey := lastKeys[0]
+
 	if pubkey.UUID != lastKey.UUID {
 		return nil, errgo.Newf("upsert key %q lookup failed, found mismatch %q", pubkey.UUID, lastKey.UUID)
 	}
