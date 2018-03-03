@@ -51,7 +51,7 @@ type algorithm struct {
 	Code int    `json:"code"`
 }
 
-type publicKey struct {
+type PublicKey struct {
 	Fingerprint  string       `json:"fingerprint"`
 	LongKeyID    string       `json:"longKeyID"`
 	ShortKeyID   string       `json:"shortKeyID"`
@@ -65,8 +65,8 @@ type publicKey struct {
 	Packet       *Packet      `json:"packet,omitempty"`
 }
 
-func newPublicKey(from *openpgp.PublicKey) *publicKey {
-	to := &publicKey{
+func newPublicKey(from *openpgp.PublicKey) *PublicKey {
+	to := &PublicKey{
 		Fingerprint: from.Fingerprint(),
 		LongKeyID:   from.KeyID(),
 		ShortKeyID:  from.ShortID(),
@@ -100,7 +100,7 @@ func newPublicKey(from *openpgp.PublicKey) *publicKey {
 }
 
 type PrimaryKey struct {
-	*publicKey
+	*PublicKey
 
 	MD5       string           `json:"md5"`
 	SHA256    string           `json:"sha256,omitempty"`
@@ -119,7 +119,7 @@ func NewPrimaryKeys(froms []*openpgp.PrimaryKey) []*PrimaryKey {
 
 func NewPrimaryKey(from *openpgp.PrimaryKey) *PrimaryKey {
 	to := &PrimaryKey{
-		publicKey: newPublicKey(&from.PublicKey),
+		PublicKey: newPublicKey(&from.PublicKey),
 		MD5:       from.MD5,
 		SHA256:    from.SHA256,
 	}
@@ -147,7 +147,7 @@ func (pk *PrimaryKey) Serialize(w io.Writer) error {
 }
 
 type SubKey struct {
-	*publicKey
+	*PublicKey
 }
 
 func NewSubKey(from *openpgp.SubKey) *SubKey {
@@ -268,7 +268,7 @@ func (s *Signature) packets() []*Packet {
 	return packets
 }
 
-func (pk *publicKey) packets() []*Packet {
+func (pk *PublicKey) packets() []*Packet {
 	packets := []*Packet{pk.Packet}
 	for _, s := range pk.Signatures {
 		packets = append(packets, s.packets()...)
@@ -302,7 +302,7 @@ func (u *UserAttribute) packets() []*Packet {
 }
 
 func (pk *PrimaryKey) packets() []*Packet {
-	packets := pk.publicKey.packets()
+	packets := pk.PublicKey.packets()
 	for _, u := range pk.UserIDs {
 		packets = append(packets, u.packets()...)
 	}
