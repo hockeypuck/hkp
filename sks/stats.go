@@ -136,8 +136,9 @@ func (s *Stats) ReadFile(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			empty := NewStats()
-			*s = *empty
+			s.Total = 0
+			s.Hourly = LoadStatMap{}
+			s.Daily = LoadStatMap{}
 			return nil
 		} else {
 			return errgo.Notef(err, "cannot open stats %q", path)
