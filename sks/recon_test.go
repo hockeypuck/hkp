@@ -47,7 +47,7 @@ func (s *SksSuite) SetUpTest(c *gc.C) {
 
 func (s *SksSuite) TestPeerStats(c *gc.C) {
 	s.peer.Start()
-	s.peer.updateDigests(storage.KeyAdded{"decafbad"})
+	s.peer.updateDigests(storage.KeyAdded{Digest: "decafbad"})
 	s.peer.Stop()
 	// TODO: patchable time.Now to test boundaries.
 	thisHour := time.Now().UTC().Truncate(time.Hour)
@@ -60,7 +60,7 @@ func (s *SksSuite) TestPeerStats(c *gc.C) {
 	c.Assert(s.peer.stats.Daily[thisDay].Inserted, gc.Equals, 1)
 	c.Assert(s.peer.stats.Daily[thisDay].Updated, gc.Equals, 0)
 
-	s.peer.updateDigests(storage.KeyReplaced{"decafbad", "cafebabe"})
+	s.peer.updateDigests(storage.KeyReplaced{OldDigest: "decafbad", NewDigest: "cafebabe"})
 	c.Assert(s.peer.stats.Total, gc.Equals, 1)
 	c.Assert(s.peer.stats.Hourly[thisHour].Inserted, gc.Equals, 1)
 	c.Assert(s.peer.stats.Hourly[thisHour].Updated, gc.Equals, 1)
